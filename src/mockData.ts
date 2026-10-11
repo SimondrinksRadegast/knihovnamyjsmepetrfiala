@@ -14,6 +14,8 @@ export const INITIAL_BOOKS: Book[] = [
     status: 'Dostupná',
     location: 'Regál A1 - Polička 1',
     coverImage: 'https://www.databazeknih.cz/img/books/72_/72361/zpev-motylu-72361.jpg?v=1301176043',
+    jacketAuthorInfo: 'Božena Němcová (1820–1862) byla významná česká spisovatelka a zakladatelka moderní české prózy. Proslula dílem Babička a sbírkami lidových pohádek.',
+    coverKeywords: ['babicka', 'venkov', 'ratiborice', 'nemcova', 'klasika', 'kroj'],
     addedDate: '2024-01-15',
   },
   {
@@ -29,6 +31,8 @@ export const INITIAL_BOOKS: Book[] = [
     status: 'Vypůjčená',
     location: 'Regál SF - Polička 2',
     coverImage: 'https://www.databazeknih.cz/img/books/43_/43683/povidky-ySP-43683.png?v=1647426116',
+    jacketAuthorInfo: 'Karel Čapek (1890–1938) byl český spisovatel, intelektuál, novinář a dramatik. Bývá považován za jednoho z nejvýznamnějších českých autorů 20. století.',
+    coverKeywords: ['robot', 'rur', 'capek', 'scifi', 'stroj', 'hudba'],
     addedDate: '2024-02-01',
     borrowedBy: 'Jan Novák (Čtenář #102)'
   },
@@ -45,6 +49,8 @@ export const INITIAL_BOOKS: Book[] = [
     status: 'Dostupná',
     location: 'Regál H1 - Polička 4',
     coverImage: 'https://images.unsplash.com/photo-1543002588-bfa74002ed7e?w=400&q=80',
+    jacketAuthorInfo: 'Jaroslav Hašek (1883–1923) byl český spisovatel, humorista, novinář a kabaretiér. Proslavil se po celém světě románem o Švejkovi.',
+    coverKeywords: ['svejk', 'valka', 'hasek', 'vojak', 'pivo', 'rakousko'],
     addedDate: '2024-02-10',
   },
   {
@@ -60,6 +66,8 @@ export const INITIAL_BOOKS: Book[] = [
     status: 'Vypůjčená',
     location: 'Regál D3 - Polička 2',
     coverImage: 'https://images.unsplash.com/photo-1495446815901-a7297e633e8d?w=400&q=80',
+    jacketAuthorInfo: 'George Orwell, vlastním jménem Eric Arthur Blair (1903–1950), byl anglický prozaik a esejista, známý antiutopickými romány 1984 a Farma zvířat.',
+    coverKeywords: ['1984', 'orwell', 'oko', 'velky bratr', 'dystopie', 'totalita'],
     addedDate: '2024-03-01',
     borrowedBy: 'Petra Dvořáková'
   },
@@ -76,6 +84,8 @@ export const INITIAL_BOOKS: Book[] = [
     status: 'V restralizaci',
     location: 'Konservační dílna - Stůl 2',
     coverImage: 'https://images.unsplash.com/photo-1532012197267-da84d127e765?w=400&q=80',
+    jacketAuthorInfo: 'Karel Jaromír Erben (1811–1870) byl český básník, sběratel českých lidových písní a pohádek, historik a archivář.',
+    coverKeywords: ['kytice', 'erben', 'balada', 'vodnik', 'polednice'],
     addedDate: '2023-11-20',
   },
   {
@@ -91,6 +101,8 @@ export const INITIAL_BOOKS: Book[] = [
     status: 'Dostupná',
     location: 'Regál P1 - Polička 1',
     coverImage: 'https://images.unsplash.com/photo-1516979187457-637abb4f9353?w=400&q=80',
+    jacketAuthorInfo: 'Antoine de Saint-Exupéry (1900–1944) byl francouzský spisovatel, básník a letec, autor světoznámého díla Malý princ.',
+    coverKeywords: ['maly princ', 'exupery', 'liska', 'kun', 'planeta', 'ruze', 'letadlo'],
     addedDate: '2024-03-05',
   },
   {
