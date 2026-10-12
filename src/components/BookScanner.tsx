@@ -193,6 +193,21 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
     setCameraError(null);
     setIsCameraLoading(true);
 
+    // Ensure secure context (HTTPS or localhost) for camera access in mobile browsers
+    if (!window.isSecureContext && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+      setIsCameraActive(false);
+      setIsCameraLoading(false);
+      setCameraError('Kamera vyžaduje zabezpečené připojení (HTTPS). Na mobilním zařízení otevřete verzi webu začínající na https://');
+      return;
+    }
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setIsCameraActive(false);
+      setIsCameraLoading(false);
+      setCameraError('Váš prohlížeč nebo zařízení nepodporuje přístup ke kameře (MediaDevices API není dostupné). Ujistěte se, že používáte podporovaný prohlížeč a HTTPS.');
+      return;
+    }
+
     try {
       if (html5QrcodeRef.current) {
         await stopCamera();
@@ -211,28 +226,64 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
         aspectRatio: 1.0,
       };
 
-      // Try camera with facingMode: "environment" first (rear camera on mobile)
+      let started = false;
+
+      // Strategy 1: Try exact environment facingMode
       try {
         await html5QrCode.start(
-          { facingMode: 'environment' },
+          { facingMode: { exact: 'environment' } },
           config,
           qrCodeSuccessCallback,
           () => {}
         );
-      } catch (envError) {
-        // Fallback to user facing camera or first available camera
-        const devices = await Html5Qrcode.getCameras();
-        if (devices && devices.length > 0) {
-          const deviceId = devices[devices.length - 1].id; // Often rear camera is listed last
+        started = true;
+      } catch (errExact) {
+        console.warn('Exact environment camera option failed, trying fallback options:', errExact);
+      }
+
+      // Strategy 2: Fallback to simple facingMode string "environment"
+      if (!started) {
+        try {
           await html5QrCode.start(
-            deviceId,
+            { facingMode: 'environment' },
             config,
             qrCodeSuccessCallback,
             () => {}
           );
-        } else {
-          throw envError;
+          started = true;
+        } catch (errFacing) {
+          console.warn('Facing mode environment failed, searching camera device list:', errFacing);
         }
+      }
+
+      // Strategy 3: Try finding camera by device label/id (prefer back/rear camera)
+      if (!started) {
+        const devices = await Html5Qrcode.getCameras();
+        if (devices && devices.length > 0) {
+          const rearCamera = devices.find(device =>
+            /back|rear|environment|zadni|zadní/i.test(device.label)
+          );
+          const targetDeviceId = rearCamera ? rearCamera.id : devices[devices.length - 1].id;
+
+          await html5QrCode.start(
+            targetDeviceId,
+            config,
+            qrCodeSuccessCallback,
+            () => {}
+          );
+          started = true;
+        } else {
+          throw new Error('NotFoundError: Nebyla nalezena žádná dostupná kamera.');
+        }
+      }
+
+      // Fix inline playback for iOS Safari & Android Chrome by applying video attributes
+      const videoElement = document.querySelector('#qr-reader video') as HTMLVideoElement | null;
+      if (videoElement) {
+        videoElement.setAttribute('playsinline', 'true');
+        videoElement.setAttribute('webkit-playsinline', 'true');
+        videoElement.setAttribute('autoplay', 'true');
+        videoElement.muted = true;
       }
 
       setIsCameraActive(true);
@@ -242,12 +293,18 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
       setIsCameraActive(false);
       setIsCameraLoading(false);
 
-      if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') {
-        setCameraError('Kamera vyžaduje zabezpečené připojení HTTPS. Na GitHub Pages zkontrolujte URL.');
-      } else if (err?.toString().includes('NotAllowedError') || err?.name === 'NotAllowedError') {
-        setCameraError('Přístup ke kameře byl odmítnut. Povolte prosím přístup ke kameře v nastavení prohlížeče.');
-      } else if (err?.toString().includes('NotFoundError') || err?.name === 'NotFoundError') {
-        setCameraError('Nebylo nalezeno žádné zařízení s kamerou.');
+      const errorStr = String(err?.message || err?.name || err);
+
+      if (!window.isSecureContext && window.location.hostname !== 'localhost') {
+        setCameraError('Kamera vyžaduje zabezpečené připojení HTTPS. Na mobilním zařízení otevřete HTTPS URL.');
+      } else if (errorStr.includes('NotAllowedError') || err?.name === 'NotAllowedError' || errorStr.includes('Permission denied')) {
+        setCameraError('Přístup ke kameře byl odmítnut. Povolte prosím přístup ke kameře v nastavení prohlížeče nebo v oprávnění webu.');
+      } else if (errorStr.includes('NotFoundError') || err?.name === 'NotFoundError' || errorStr.includes('DevicesNotFoundError')) {
+        setCameraError('Nebylo nalezeno žádné zařízení s kamerou nebo je kamera používána jinou aplikací.');
+      } else if (errorStr.includes('OverconstrainedError') || err?.name === 'OverconstrainedError') {
+        setCameraError('Požadované rozlišení nebo nastavení kamery není podporováno vaším mobilním zařízením.');
+      } else if (errorStr.includes('NotReadableError') || err?.name === 'NotReadableError' || errorStr.includes('TrackStartError')) {
+        setCameraError('Kamera je již používána jinou aplikací nebo prohlížečem. Zavřete ostatní aplikace využívající kameru.');
       } else {
         setCameraError(`Nepodařilo se spustit kameru: ${err?.message || err || 'Neznámá chyba'}`);
       }
