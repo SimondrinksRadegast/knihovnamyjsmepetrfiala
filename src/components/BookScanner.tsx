@@ -192,10 +192,20 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
   const startCamera = async () => {
     setCameraError(null);
     setIsCameraLoading(true);
+    // Ensure the container #qr-reader is rendered in the DOM before html5-qrcode attaches to it
+    setIsCameraActive(true);
+
+    // Give React time to render the #qr-reader div
+    await new Promise((resolve) => setTimeout(resolve, 100));
 
     try {
       if (html5QrcodeRef.current) {
-        await stopCamera();
+        try {
+          if (html5QrcodeRef.current.isScanning) {
+            await html5QrcodeRef.current.stop();
+          }
+          html5QrcodeRef.current.clear();
+        } catch (_) {}
       }
 
       const html5QrCode = new Html5Qrcode('qr-reader');
@@ -207,7 +217,13 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
 
       const config = {
         fps: 10,
-        qrbox: { width: 250, height: 250 },
+        qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
+          const minDim = Math.min(viewfinderWidth, viewfinderHeight);
+          return {
+            width: Math.floor(minDim * 0.75),
+            height: Math.floor(minDim * 0.75),
+          };
+        },
         aspectRatio: 1.0,
       };
 
@@ -220,22 +236,31 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
           () => {}
         );
       } catch (envError) {
-        // Fallback to user facing camera or first available camera
-        const devices = await Html5Qrcode.getCameras();
-        if (devices && devices.length > 0) {
-          const deviceId = devices[devices.length - 1].id; // Often rear camera is listed last
+        try {
+          // Fallback 1: try user facing camera
           await html5QrCode.start(
-            deviceId,
+            { facingMode: 'user' },
             config,
             qrCodeSuccessCallback,
             () => {}
           );
-        } else {
-          throw envError;
+        } catch (userError) {
+          // Fallback 2: get devices list
+          const devices = await Html5Qrcode.getCameras();
+          if (devices && devices.length > 0) {
+            const deviceId = devices[devices.length - 1].id;
+            await html5QrCode.start(
+              deviceId,
+              config,
+              qrCodeSuccessCallback,
+              () => {}
+            );
+          } else {
+            throw envError;
+          }
         }
       }
 
-      setIsCameraActive(true);
       setIsCameraLoading(false);
     } catch (err: any) {
       console.error('Camera initialization error:', err);
@@ -503,17 +528,18 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
           <div className="absolute inset-0 bg-[radial-gradient(#3b82f6_1px,transparent_1px)] [background-size:16px_16px] opacity-20"></div>
 
           {/* Live Camera Viewport */}
-          <div className={`w-full overflow-hidden rounded-xl border border-slate-700 bg-black z-10 mb-4 ${isCameraActive ? 'block' : 'hidden'}`}>
+          <div className={`w-full relative overflow-hidden rounded-xl border border-slate-700 bg-black z-10 mb-4 ${isCameraActive ? 'block' : 'hidden'}`}>
             <div id="qr-reader" className="w-full"></div>
+            {isCameraLoading && (
+              <div className="absolute inset-0 bg-slate-900/90 flex flex-col items-center justify-center p-4 space-y-2 z-20">
+                <RefreshCw size={36} className="text-blue-400 animate-spin mx-auto" />
+                <p className="text-sm font-bold text-blue-200">Spouštění kamery mobilu...</p>
+                <p className="text-xs text-slate-400">Povolte přístup ke kameře v prohlížeči</p>
+              </div>
+            )}
           </div>
 
-          {isCameraLoading ? (
-            <div className="space-y-3 z-10 py-6">
-              <RefreshCw size={40} className="text-blue-400 animate-spin mx-auto" />
-              <p className="text-sm font-bold text-blue-200">Spouštění kamery mobilu...</p>
-              <p className="text-xs text-slate-400">Žádost o přístup ke kameře zařázení</p>
-            </div>
-          ) : isSimulatingCamera ? (
+          {isSimulatingCamera ? (
             <div className="space-y-3 z-10 py-6">
               <RefreshCw size={40} className="text-blue-400 animate-spin mx-auto" />
               <p className="text-sm font-bold text-blue-200">Probíhá analýza QR kódu a rozpoznání...</p>
