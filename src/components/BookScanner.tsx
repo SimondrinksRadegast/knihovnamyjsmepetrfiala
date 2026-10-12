@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import type { Book } from '../types';
-import { ScanLine, Search, QrCode, BookCheck, CheckCircle, RefreshCw, Sparkles, Image as ImageIcon, BookOpen, Upload, UserCheck, FileText } from 'lucide-react';
+import { ScanLine, Search, QrCode, BookCheck, CheckCircle, RefreshCw, Sparkles, Image as ImageIcon, BookOpen, Upload, UserCheck, FileText, Camera, CameraOff, AlertCircle } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
+import { Html5Qrcode } from 'html5-qrcode';
 
 interface BookScannerProps {
   books: Book[];
@@ -15,6 +16,12 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
   const [isSimulatingCamera, setIsSimulatingCamera] = useState(false);
   const [lastScannedResult, setLastScannedResult] = useState<string | null>(null);
   const [actionSuccessMessage, setActionSuccessMessage] = useState<string | null>(null);
+
+  // Real Camera Scanner state
+  const [isCameraActive, setIsCameraActive] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [isCameraLoading, setIsCameraLoading] = useState(false);
+  const html5QrcodeRef = useRef<Html5Qrcode | null>(null);
 
   // Cover image / Jacket OCR state
   const [selectedCoverImage, setSelectedCoverImage] = useState<string | null>(null);
@@ -132,6 +139,128 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
     );
     setTimeout(() => setActionSuccessMessage(null), 4000);
   };
+
+  const handleDecodedCode = (decodedText: string) => {
+    let cleanCode = decodedText.trim();
+    // If QR code format is LIB:CODE:ISBN, extract code or search string
+    if (cleanCode.startsWith('LIB:')) {
+      const parts = cleanCode.split(':');
+      if (parts[1]) {
+        cleanCode = parts[1];
+      }
+    }
+
+    setScanInput(cleanCode);
+
+    // Search for matching books
+    const cleanQuery = cleanCode.toLowerCase();
+    const matched = books.filter((book) => {
+      return (
+        book.code.toLowerCase() === cleanQuery ||
+        book.isbn.toLowerCase().replace(/[- ]/g, '') === cleanQuery.replace(/[- ]/g, '') ||
+        book.code.toLowerCase().includes(cleanQuery) ||
+        book.isbn.toLowerCase().includes(cleanQuery) ||
+        book.title.toLowerCase().includes(cleanQuery)
+      );
+    });
+
+    if (matched.length > 0) {
+      setMatchedBooks(matched);
+      setLastScannedResult(`Naskenováno: ${cleanCode} (${matched[0].title})`);
+    } else {
+      setMatchedBooks([]);
+      setLastScannedResult(`Naskenován kód: ${cleanCode} (nenalezena v databázi)`);
+    }
+  };
+
+  const stopCamera = async () => {
+    if (html5QrcodeRef.current) {
+      try {
+        if (html5QrcodeRef.current.isScanning) {
+          await html5QrcodeRef.current.stop();
+        }
+        html5QrcodeRef.current.clear();
+      } catch (err) {
+        console.warn('Error stopping camera:', err);
+      }
+      html5QrcodeRef.current = null;
+    }
+    setIsCameraActive(false);
+    setIsCameraLoading(false);
+  };
+
+  const startCamera = async () => {
+    setCameraError(null);
+    setIsCameraLoading(true);
+
+    try {
+      if (html5QrcodeRef.current) {
+        await stopCamera();
+      }
+
+      const html5QrCode = new Html5Qrcode('qr-reader');
+      html5QrcodeRef.current = html5QrCode;
+
+      const qrCodeSuccessCallback = (decodedText: string) => {
+        handleDecodedCode(decodedText);
+      };
+
+      const config = {
+        fps: 10,
+        qrbox: { width: 250, height: 250 },
+        aspectRatio: 1.0,
+      };
+
+      // Try camera with facingMode: "environment" first (rear camera on mobile)
+      try {
+        await html5QrCode.start(
+          { facingMode: 'environment' },
+          config,
+          qrCodeSuccessCallback,
+          () => {}
+        );
+      } catch (envError) {
+        // Fallback to user facing camera or first available camera
+        const devices = await Html5Qrcode.getCameras();
+        if (devices && devices.length > 0) {
+          const deviceId = devices[devices.length - 1].id; // Often rear camera is listed last
+          await html5QrCode.start(
+            deviceId,
+            config,
+            qrCodeSuccessCallback,
+            () => {}
+          );
+        } else {
+          throw envError;
+        }
+      }
+
+      setIsCameraActive(true);
+      setIsCameraLoading(false);
+    } catch (err: any) {
+      console.error('Camera initialization error:', err);
+      setIsCameraActive(false);
+      setIsCameraLoading(false);
+
+      if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') {
+        setCameraError('Kamera vyžaduje zabezpečené připojení HTTPS. Na GitHub Pages zkontrolujte URL.');
+      } else if (err?.toString().includes('NotAllowedError') || err?.name === 'NotAllowedError') {
+        setCameraError('Přístup ke kameře byl odmítnut. Povolte prosím přístup ke kameře v nastavení prohlížeče.');
+      } else if (err?.toString().includes('NotFoundError') || err?.name === 'NotFoundError') {
+        setCameraError('Nebylo nalezeno žádné zařízení s kamerou.');
+      } else {
+        setCameraError(`Nepodařilo se spustit kameru: ${err?.message || err || 'Neznámá chyba'}`);
+      }
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (html5QrcodeRef.current && html5QrcodeRef.current.isScanning) {
+        html5QrcodeRef.current.stop().catch(() => {});
+      }
+    };
+  }, []);
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
@@ -369,32 +498,75 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
           </div>
         </div>
 
-        {/* Right Column: Simulated Camera Box */}
-        <div className="bg-slate-900 text-white rounded-2xl p-6 shadow-sm border border-slate-800 flex flex-col items-center justify-center text-center relative overflow-hidden">
+        {/* Right Column: Camera / Scanner Box */}
+        <div className="bg-slate-900 text-white rounded-2xl p-6 shadow-sm border border-slate-800 flex flex-col items-center justify-center text-center relative overflow-hidden min-h-[320px]">
           <div className="absolute inset-0 bg-[radial-gradient(#3b82f6_1px,transparent_1px)] [background-size:16px_16px] opacity-20"></div>
 
-          {isSimulatingCamera ? (
+          {/* Live Camera Viewport */}
+          <div className={`w-full overflow-hidden rounded-xl border border-slate-700 bg-black z-10 mb-4 ${isCameraActive ? 'block' : 'hidden'}`}>
+            <div id="qr-reader" className="w-full"></div>
+          </div>
+
+          {isCameraLoading ? (
+            <div className="space-y-3 z-10 py-6">
+              <RefreshCw size={40} className="text-blue-400 animate-spin mx-auto" />
+              <p className="text-sm font-bold text-blue-200">Spouštění kamery mobilu...</p>
+              <p className="text-xs text-slate-400">Žádost o přístup ke kameře zařázení</p>
+            </div>
+          ) : isSimulatingCamera ? (
             <div className="space-y-3 z-10 py-6">
               <RefreshCw size={40} className="text-blue-400 animate-spin mx-auto" />
               <p className="text-sm font-bold text-blue-200">Probíhá analýza QR kódu a rozpoznání...</p>
               <p className="text-xs text-slate-400">Načítání údajů z databáze knihovny</p>
             </div>
-          ) : (
-            <div className="space-y-3 z-10 py-4">
+          ) : !isCameraActive ? (
+            <div className="space-y-3 z-10 py-2">
               <div className="w-20 h-20 border-2 border-dashed border-blue-500/60 rounded-2xl flex items-center justify-center mx-auto bg-blue-500/10">
                 <ScanLine size={36} className="text-blue-400" />
               </div>
               <div>
-                <h4 className="font-bold text-sm text-slate-100">Kamera pro skenování QR</h4>
+                <h4 className="font-bold text-sm text-slate-100">Kamera pro skenování QR & Čárových kódů</h4>
                 <p className="text-xs text-slate-400 mt-1 max-w-xs">
-                  Naměřte kameru zařízení na printed QR štítek na hřbetu knížky.
+                  Spusťte kameru mobilu pro okamžité skenování štítků knih.
                 </p>
+              </div>
+            </div>
+          ) : null}
+
+          {cameraError && (
+            <div className="mt-2 text-xs bg-red-500/20 text-red-300 border border-red-500/30 p-3 rounded-lg z-10 text-left flex items-start gap-2 max-w-xs">
+              <AlertCircle size={16} className="shrink-0 text-red-400 mt-0.5" />
+              <div>
+                <p className="font-bold">Chyba kamery:</p>
+                <p>{cameraError}</p>
               </div>
             </div>
           )}
 
+          {/* Action buttons to Start / Stop Camera */}
+          <div className="z-10 mt-3 flex items-center gap-2">
+            {!isCameraActive ? (
+              <button
+                onClick={startCamera}
+                disabled={isCameraLoading}
+                className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-bold rounded-xl text-xs transition flex items-center gap-2 shadow-lg shadow-blue-600/30"
+              >
+                <Camera size={16} />
+                <span>{isCameraLoading ? 'Načítání...' : 'Spustit Kameru Mobilu'}</span>
+              </button>
+            ) : (
+              <button
+                onClick={stopCamera}
+                className="px-4 py-2.5 bg-red-600 hover:bg-red-500 active:bg-red-700 text-white font-bold rounded-xl text-xs transition flex items-center gap-2 shadow-lg shadow-red-600/30"
+              >
+                <CameraOff size={16} />
+                <span>Vypnout Kameru</span>
+              </button>
+            )}
+          </div>
+
           {lastScannedResult && !isSimulatingCamera && (
-            <div className="mt-2 text-xs bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 p-2 rounded-lg z-10 font-mono">
+            <div className="mt-3 text-xs bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 p-2 rounded-lg z-10 font-mono">
               {lastScannedResult}
             </div>
           )}
