@@ -15,6 +15,8 @@ export interface Book {
   status: BookStatus;
   location: string; // Umístění např. "Regál A2 - Polička 3"
   coverImage?: string;
+  jacketAuthorInfo?: string; // Informace o autorovi na přebalu knihy (medailonek, biografie)
+  coverKeywords?: string[]; // Klíčová slova vizuálního obalu
   addedDate: string;
   borrowedBy?: string;
 }
