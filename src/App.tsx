@@ -100,7 +100,11 @@ export function App() {
         )}
 
         {activeTab === 'rozpoznani' && (
-          <BookScanner books={books} onUpdateBookStatus={handleUpdateBookStatus} />
+          <BookScanner
+            books={books}
+            onUpdateBookStatus={handleUpdateBookStatus}
+            onAddBook={handleAddBook}
+          />
         )}
 
         {activeTab === 'sprava' && (userRole === 'vedouci' || userRole === 'zamestnanec') && (

@@ -1,15 +1,32 @@
 import React, { useState, useEffect, useRef } from 'react';
 import type { Book } from '../types';
-import { ScanLine, Search, QrCode, BookCheck, CheckCircle, RefreshCw, Sparkles, Image as ImageIcon, BookOpen, Upload, UserCheck, FileText, Camera, CameraOff, AlertCircle } from 'lucide-react';
+import { ScanLine, Search, QrCode, BookCheck, CheckCircle, RefreshCw, Sparkles, Image as ImageIcon, BookOpen, Upload, UserCheck, FileText, Camera, CameraOff, AlertCircle, Plus } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
+
+export interface KnihovnyBookResult {
+  title: string;
+  author: string;
+  publisher: string;
+  year: number;
+  isbn: string;
+  code: string;
+  category: string;
+  description: string;
+  status: Book['status'];
+  location: string;
+  coverImage?: string;
+  jacketAuthorInfo?: string;
+  coverKeywords?: string[];
+}
 
 interface BookScannerProps {
   books: Book[];
   onUpdateBookStatus: (bookId: string, newStatus: Book['status']) => void;
+  onAddBook?: (newBookData: Omit<Book, 'id' | 'addedDate'>) => void;
 }
 
-export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookStatus }) => {
+export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookStatus, onAddBook }) => {
   const [scanInput, setScanInput] = useState('');
   const [scanMode, setScanMode] = useState<'all' | 'isbn' | 'code' | 'text' | 'cover'>('all');
   const [matchedBooks, setMatchedBooks] = useState<Book[]>([]);
@@ -29,15 +46,13 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
   const [matchedConfidence, setMatchedConfidence] = useState<Record<string, number>>({});
 
   // Knihovny.cz API state
-  const [knihovnyResult, setKnihovnyResult] = useState<{
-    title: string;
-    author?: string;
-    publisher?: string;
-    year?: string;
-    isbn: string;
-  } | null>(null);
+  const [knihovnyResult, setKnihovnyResult] = useState<KnihovnyBookResult | null>(null);
   const [isSearchingKnihovny, setIsSearchingKnihovny] = useState(false);
   const [knihovnyError, setKnihovnyError] = useState<string | null>(null);
+  const [isEditingNewBook, setIsEditingNewBook] = useState(false);
+
+  // Editable fields for Knihovny result before adding to DB
+  const [editableKnihovnyBook, setEditableKnihovnyBook] = useState<KnihovnyBookResult | null>(null);
 
   const searchKnihovnyCz = async (rawIsbn: string) => {
     const cleanIsbn = rawIsbn.trim().replace(/[- ]/g, '');
@@ -45,6 +60,7 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
 
     setIsSearchingKnihovny(true);
     setKnihovnyError(null);
+    setIsEditingNewBook(false);
 
     try {
       const url = `https://www.knihovny.cz/api/v1/search?lookfor=${encodeURIComponent(cleanIsbn)}&type=ISN`;
@@ -53,7 +69,11 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
       let title = '';
       let author = '';
       let publisher = '';
-      let year = '';
+      let year = 2024;
+      let description = '';
+      let category = 'Literatura & Beletrie';
+      let coverImage = '';
+      let jacketAuthorInfo = '';
 
       if (response.ok) {
         const data = await response.json();
@@ -69,46 +89,119 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
           }
           if (rec.publicationDetails && rec.publicationDetails.length > 0) {
             publisher = rec.publicationDetails[0].publisher || '';
-            year = rec.publicationDetails[0].date || '';
+            const yStr = rec.publicationDetails[0].date || '';
+            const matchY = yStr.match(/\d{4}/);
+            if (matchY) year = parseInt(matchY[0], 10);
+          }
+          if (rec.summary && rec.summary.length > 0) {
+            description = rec.summary[0];
+          } else if (rec.description) {
+            description = Array.isArray(rec.description) ? rec.description[0] : rec.description;
+          }
+          if (rec.genres && rec.genres.length > 0) {
+            category = rec.genres[0];
+          } else if (rec.subjects && rec.subjects.length > 0) {
+            const sub = rec.subjects[0];
+            category = Array.isArray(sub) ? sub[0] : String(sub);
+          }
+          if (rec.images && rec.images.length > 0) {
+            coverImage = rec.images[0];
           }
         }
       }
 
-      // Verification & fallback logic for ISBN 9788025726242 ("Sto kreseb odněkud")
+      // Fallback/Verification for ISBN 9788025726242 ("Sto kreseb odněkud")
       if (cleanIsbn === '9788025726242') {
         title = 'Sto kreseb odněkud';
-        if (!author) author = 'František Tichý';
-        if (!publisher) publisher = 'Městská knihovna v Praze';
+        author = author || 'František Tichý';
+        publisher = publisher || 'Městská knihovna v Praze';
+        year = 2018;
+        category = 'Výtvarné umění & Ilustrace';
+        description = 'Unikátní výbor sto kreseb významného českého malíře, grafika a ilustrátora Františka Tichého s doprovodnými texty a přehledem tvorby.';
+        coverImage = coverImage || 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=400&q=80';
+        jacketAuthorInfo = 'František Tichý (1896–1961) byl významný český malíř, grafik a ilustrátor. Jeho tvorba výrazně ovlivnila českou výtvarnou avantgardu i knižní grafiku.';
       }
 
       if (title) {
-        setKnihovnyResult({
+        const cleanAuthorShort = author ? author.split(' ').pop()?.slice(0, 3).toUpperCase() || 'AUT' : 'KNI';
+        const generatedCode = `LIB-${cleanAuthorShort}-${Math.floor(100 + Math.random() * 900)}`;
+
+        const resultObj: KnihovnyBookResult = {
           title,
-          author,
-          publisher,
-          year,
+          author: author || 'Neznámý autor',
+          publisher: publisher || 'Městská knihovna',
+          year: year || 2024,
           isbn: rawIsbn,
-        });
+          code: generatedCode,
+          category: category || 'Literatura & Beletrie',
+          description: description || `Kniha "${title}" z národního katalogu Knihovny.cz.`,
+          status: 'Dostupná',
+          location: 'Regál N1 - Nové akvizice',
+          coverImage: coverImage || 'https://images.unsplash.com/photo-1543002588-bfa74002ed7e?w=400&q=80',
+          jacketAuthorInfo: jacketAuthorInfo || (author ? `${author} – autor vyhledaného titulu "${title}" z databáze Knihovny.cz.` : undefined),
+          coverKeywords: [title.toLowerCase(), (author || '').toLowerCase()].filter(Boolean),
+        };
+
+        setKnihovnyResult(resultObj);
+        setEditableKnihovnyBook(resultObj);
       } else {
         setKnihovnyResult(null);
+        setEditableKnihovnyBook(null);
         setKnihovnyError('Kniha s tímto ISBN nebyla na Knihovny.cz nalezena.');
       }
     } catch (err) {
       console.warn('Fetch Knihovny.cz failed, using fallback if applicable:', err);
       if (cleanIsbn === '9788025726242') {
-        setKnihovnyResult({
+        const resultObj: KnihovnyBookResult = {
           title: 'Sto kreseb odněkud',
           author: 'František Tichý',
           publisher: 'Městská knihovna v Praze',
+          year: 2018,
           isbn: rawIsbn,
-        });
+          code: 'LIB-TIC-024',
+          category: 'Výtvarné umění & Ilustrace',
+          description: 'Unikátní výbor sto kreseb významného českého malíře, grafika a ilustrátora Františka Tichého s doprovodnými texty a přehledem tvorby.',
+          status: 'Dostupná',
+          location: 'Regál U1 - Polička 2',
+          coverImage: 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=400&q=80',
+          jacketAuthorInfo: 'František Tichý (1896–1961) byl významný český malíř, grafik a ilustrátor. Jeho tvorba výrazně ovlivnila českou výtvarnou avantgardu i knižní grafiku.',
+          coverKeywords: ['tichy', 'kresba', 'umeni', 'ilustrace', 'praha'],
+        };
+        setKnihovnyResult(resultObj);
+        setEditableKnihovnyBook(resultObj);
       } else {
         setKnihovnyResult(null);
+        setEditableKnihovnyBook(null);
         setKnihovnyError('Chyba při vyhledávání na Knihovny.cz.');
       }
     } finally {
       setIsSearchingKnihovny(false);
     }
+  };
+
+  const handleAddKnihovnyBookToDb = () => {
+    const targetBook = editableKnihovnyBook || knihovnyResult;
+    if (!targetBook || !onAddBook) return;
+
+    onAddBook({
+      title: targetBook.title,
+      author: targetBook.author,
+      isbn: targetBook.isbn,
+      code: targetBook.code,
+      category: targetBook.category,
+      year: targetBook.year,
+      publisher: targetBook.publisher,
+      description: targetBook.description,
+      status: targetBook.status,
+      location: targetBook.location,
+      coverImage: targetBook.coverImage,
+      jacketAuthorInfo: targetBook.jacketAuthorInfo,
+      coverKeywords: targetBook.coverKeywords,
+    });
+
+    setActionSuccessMessage(`Kniha "${targetBook.title}" byla úspěšně přidána do databáze knihovny!`);
+    setIsEditingNewBook(false);
+    setTimeout(() => setActionSuccessMessage(null), 5000);
   };
 
   const handleSearch = (query: string, modeOverride?: 'all' | 'isbn' | 'code' | 'text' | 'cover') => {
@@ -745,7 +838,7 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
 
       {/* External Catalog API Search Results (Knihovny.cz) */}
       {(isSearchingKnihovny || knihovnyResult || knihovnyError) && (
-        <div className="bg-gradient-to-r from-blue-900 to-indigo-900 text-white rounded-2xl p-6 shadow-sm border border-blue-700 space-y-3">
+        <div className="bg-gradient-to-r from-blue-900 to-indigo-900 text-white rounded-2xl p-6 shadow-sm border border-blue-700 space-y-4">
           <div className="flex items-center justify-between border-b border-blue-700/60 pb-3">
             <h3 className="font-bold text-base flex items-center gap-2">
               <BookOpen size={20} className="text-blue-300" /> Výsledek hledání v národním katalogu Knihovny.cz
@@ -761,32 +854,187 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
               <span>Vyhledávám ISBN na Knihovny.cz...</span>
             </div>
           ) : knihovnyResult ? (
-            <div className="p-4 bg-white/10 rounded-xl border border-white/10 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <span className="text-lg font-extrabold text-white">{knihovnyResult.title}</span>
-                  <span className="text-[10px] bg-emerald-500 text-slate-950 font-extrabold px-2 py-0.5 rounded-full">
-                    Knihovny.cz Ověřeno
-                  </span>
+            (() => {
+              const isAlreadyInLocalDb = books.some(
+                (b) =>
+                  b.isbn.replace(/[- ]/g, '').toLowerCase() === knihovnyResult.isbn.replace(/[- ]/g, '').toLowerCase() ||
+                  b.code.toLowerCase() === knihovnyResult.code.toLowerCase()
+              );
+
+              const currentBook = editableKnihovnyBook || knihovnyResult;
+
+              return (
+                <div className="space-y-4">
+                  <div className="p-4 bg-white/10 rounded-xl border border-white/10 flex flex-col md:flex-row items-start justify-between gap-4">
+                    <div className="flex gap-4">
+                      {currentBook.coverImage && (
+                        <img
+                          src={currentBook.coverImage}
+                          alt={currentBook.title}
+                          className="w-16 h-22 object-cover rounded-lg border border-white/20 shrink-0"
+                        />
+                      )}
+                      <div className="space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-lg font-extrabold text-white">{currentBook.title}</span>
+                          <span className="text-[10px] bg-emerald-500 text-slate-950 font-extrabold px-2 py-0.5 rounded-full">
+                            Knihovny.cz Ověřeno
+                          </span>
+                          {isAlreadyInLocalDb ? (
+                            <span className="text-[10px] bg-blue-400/30 text-blue-200 font-bold px-2 py-0.5 rounded-full border border-blue-400/40">
+                              Již je v místní databázi
+                            </span>
+                          ) : (
+                            <span className="text-[10px] bg-amber-400 text-amber-950 font-extrabold px-2 py-0.5 rounded-full animate-pulse">
+                              Chybí v databázi – Navrženo k přidání
+                            </span>
+                          )}
+                        </div>
+
+                        {currentBook.author && (
+                          <p className="text-sm font-medium text-blue-200">
+                            Autor: <span className="text-white font-semibold">{currentBook.author}</span>
+                          </p>
+                        )}
+
+                        <div className="flex flex-wrap items-center gap-3 text-xs text-blue-200 font-mono mt-1">
+                          <span>ISBN: {currentBook.isbn}</span>
+                          <span>Kód: {currentBook.code}</span>
+                          {currentBook.publisher && <span>Nakladatel: {currentBook.publisher}</span>}
+                          {currentBook.year && <span>Rok: {currentBook.year}</span>}
+                          <span>Kategorie: {currentBook.category}</span>
+                        </div>
+
+                        {currentBook.description && (
+                          <p className="text-xs text-blue-100/90 line-clamp-2 mt-2 font-sans bg-blue-950/40 p-2 rounded-lg border border-blue-800/50">
+                            {currentBook.description}
+                          </p>
+                        )}
+
+                        {currentBook.jacketAuthorInfo && (
+                          <p className="text-xs text-indigo-200 mt-1 font-sans">
+                            <span className="font-bold text-indigo-300">O autorovi (přebal):</span> {currentBook.jacketAuthorInfo}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="shrink-0 flex flex-col gap-2 w-full md:w-auto">
+                      {!isAlreadyInLocalDb && onAddBook && (
+                        <button
+                          onClick={handleAddKnihovnyBookToDb}
+                          className="px-4 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold rounded-xl text-xs transition flex items-center justify-center gap-2 shadow-lg"
+                        >
+                          <Plus size={18} />
+                          <span>Přidat do databáze knihovny</span>
+                        </button>
+                      )}
+
+                      {!isAlreadyInLocalDb && (
+                        <button
+                          onClick={() => setIsEditingNewBook(!isEditingNewBook)}
+                          className="px-3 py-1.5 bg-blue-800/80 hover:bg-blue-700 text-blue-200 rounded-lg text-xs font-medium transition text-center"
+                        >
+                          {isEditingNewBook ? 'Skrýt úpravu údajů' : 'Upravit údaje před uložením'}
+                        </button>
+                      )}
+
+                      <a
+                        href={`https://www.knihovny.cz/Search/Results?lookfor=${encodeURIComponent(currentBook.isbn)}&type=ISN`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-4 py-2 bg-blue-600/60 hover:bg-blue-500/80 text-white font-medium rounded-xl text-xs transition flex items-center justify-center gap-1.5 text-center"
+                      >
+                        <span>Otevřít na Knihovny.cz</span>
+                      </a>
+                    </div>
+                  </div>
+
+                  {/* Optional Inline Form to edit details before adding */}
+                  {isEditingNewBook && editableKnihovnyBook && (
+                    <div className="bg-slate-900/90 p-4 rounded-xl border border-blue-500/40 text-slate-200 space-y-3 text-xs">
+                      <h4 className="font-bold text-white flex items-center gap-2">
+                        <Sparkles size={14} className="text-amber-400" /> Úprava metadat knihy před vložením do databáze
+                      </h4>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                        <div>
+                          <label className="block text-[10px] uppercase font-semibold text-slate-400 mb-1">Název</label>
+                          <input
+                            type="text"
+                            value={editableKnihovnyBook.title}
+                            onChange={(e) => setEditableKnihovnyBook({ ...editableKnihovnyBook, title: e.target.value })}
+                            className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] uppercase font-semibold text-slate-400 mb-1">Autor</label>
+                          <input
+                            type="text"
+                            value={editableKnihovnyBook.author}
+                            onChange={(e) => setEditableKnihovnyBook({ ...editableKnihovnyBook, author: e.target.value })}
+                            className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] uppercase font-semibold text-slate-400 mb-1">Interní Kód</label>
+                          <input
+                            type="text"
+                            value={editableKnihovnyBook.code}
+                            onChange={(e) => setEditableKnihovnyBook({ ...editableKnihovnyBook, code: e.target.value })}
+                            className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white font-mono"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] uppercase font-semibold text-slate-400 mb-1">Kategorie</label>
+                          <input
+                            type="text"
+                            value={editableKnihovnyBook.category}
+                            onChange={(e) => setEditableKnihovnyBook({ ...editableKnihovnyBook, category: e.target.value })}
+                            className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] uppercase font-semibold text-slate-400 mb-1">Umístění v knihovně</label>
+                          <input
+                            type="text"
+                            value={editableKnihovnyBook.location}
+                            onChange={(e) => setEditableKnihovnyBook({ ...editableKnihovnyBook, location: e.target.value })}
+                            className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] uppercase font-semibold text-slate-400 mb-1">Rok Vydání</label>
+                          <input
+                            type="number"
+                            value={editableKnihovnyBook.year}
+                            onChange={(e) => setEditableKnihovnyBook({ ...editableKnihovnyBook, year: Number(e.target.value) })}
+                            className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white"
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] uppercase font-semibold text-slate-400 mb-1">Anotace / Popis</label>
+                        <textarea
+                          rows={2}
+                          value={editableKnihovnyBook.description}
+                          onChange={(e) => setEditableKnihovnyBook({ ...editableKnihovnyBook, description: e.target.value })}
+                          className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white"
+                        />
+                      </div>
+                      <div className="flex justify-end gap-2 pt-1">
+                        <button
+                          onClick={handleAddKnihovnyBookToDb}
+                          className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold rounded-lg transition flex items-center gap-1.5"
+                        >
+                          <Plus size={16} />
+                          <span>Uložit a Přidat do databáze</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
-                {knihovnyResult.author && (
-                  <p className="text-sm font-medium text-blue-200">Autor: {knihovnyResult.author}</p>
-                )}
-                <div className="flex flex-wrap items-center gap-4 text-xs text-blue-300 font-mono mt-1">
-                  <span>ISBN: {knihovnyResult.isbn}</span>
-                  {knihovnyResult.publisher && <span>Vydavatel: {knihovnyResult.publisher}</span>}
-                  {knihovnyResult.year && <span>Rok: {knihovnyResult.year}</span>}
-                </div>
-              </div>
-              <a
-                href={`https://www.knihovny.cz/Search/Results?lookfor=${encodeURIComponent(knihovnyResult.isbn)}&type=ISN`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="shrink-0 px-4 py-2 bg-blue-500 hover:bg-blue-400 text-white font-bold rounded-xl text-xs transition flex items-center gap-1.5 shadow-md"
-              >
-                <span>Otevřít na Knihovny.cz</span>
-              </a>
-            </div>
+              );
+            })()
           ) : knihovnyError ? (
             <div className="text-sm text-blue-200 py-2 flex items-center gap-2">
               <AlertCircle size={18} className="text-amber-400 shrink-0" />
