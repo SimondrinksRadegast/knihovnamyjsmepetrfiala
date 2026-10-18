@@ -7,6 +7,7 @@ import { BookScanner } from './components/BookScanner';
 import { AdminPanel } from './components/AdminPanel';
 import { QRCodeGenerator } from './components/QRCodeGenerator';
 import { AuthModal } from './components/AuthModal';
+import { fetchNewestCoverFromKnihovny } from './services/knihovnyCover';
 
 export function App() {
   const [books, setBooks] = useState<Book[]>(INITIAL_BOOKS);
@@ -44,9 +45,26 @@ export function App() {
   };
 
   // Database Mutations
-  const handleAddBook = (newBookData: Omit<Book, 'id' | 'addedDate'>) => {
+  const handleAddBook = async (newBookData: Omit<Book, 'id' | 'addedDate'>) => {
+    let coverImage = newBookData.coverImage;
+    if (!coverImage) {
+      try {
+        const fetchedCover = await fetchNewestCoverFromKnihovny({
+          title: newBookData.title,
+          author: newBookData.author,
+          isbn: newBookData.isbn,
+        });
+        if (fetchedCover) {
+          coverImage = fetchedCover;
+        }
+      } catch {
+        // proceed if cover fetch fails
+      }
+    }
+
     const newBook: Book = {
       ...newBookData,
+      coverImage: coverImage || 'https://images.unsplash.com/photo-1543002588-bfa74002ed7e?w=400&q=80',
       id: 'b-' + Date.now(),
       addedDate: new Date().toISOString().split('T')[0],
     };

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import type { Book, UserRole, BookStatus } from '../types';
-import { Plus, Edit2, Trash2, Save, X, Search, QrCode } from 'lucide-react';
+import { Plus, Edit2, Trash2, Save, X, Search, QrCode, Sparkles, BookOpen, RefreshCw } from 'lucide-react';
+import { fetchNewestCoverResultFromKnihovny } from '../services/knihovnyCover';
 
 interface AdminPanelProps {
   books: Book[];
@@ -36,6 +37,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [status, setStatus] = useState<BookStatus>('Dostupná');
   const [location, setLocation] = useState('Regál A1 - Polička 1');
   const [coverImage, setCoverImage] = useState('');
+  const [isFetchingCover, setIsFetchingCover] = useState(false);
+  const [coverNote, setCoverNote] = useState<string | null>(null);
 
   const resetForm = () => {
     setTitle('');
@@ -49,6 +52,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setStatus('Dostupná');
     setLocation('Regál A1 - Polička 1');
     setCoverImage('');
+    setCoverNote(null);
+    setIsFetchingCover(false);
     setEditingBookId(null);
     setIsFormOpen(false);
   };
@@ -66,7 +71,30 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setStatus(book.status);
     setLocation(book.location);
     setCoverImage(book.coverImage || '');
+    setCoverNote(null);
     setIsFormOpen(true);
+  };
+
+  const handleFetchKnihovnyCover = async () => {
+    if (!title && !isbn) {
+      alert('Pro vyhledání přebalu z Knihovny.cz zadejte nejprve Název nebo ISBN knihy.');
+      return;
+    }
+    setIsFetchingCover(true);
+    setCoverNote(null);
+    try {
+      const res = await fetchNewestCoverResultFromKnihovny({ title, author, isbn });
+      if (res && res.url) {
+        setCoverImage(res.url);
+        setCoverNote(res.sourceNote || 'Přebal načten z Knihovny.cz (Nejnovější dostupné vydání)');
+      } else {
+        setCoverNote('Přebal na Knihovny.cz nebyl nalezen.');
+      }
+    } catch {
+      setCoverNote('Nepodařilo se načíst přebal z Knihovny.cz.');
+    } finally {
+      setIsFetchingCover(false);
+    }
   };
 
   const handleStartAdd = () => {
@@ -75,11 +103,26 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setIsFormOpen(true);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title || !author || !isbn || !code) {
       alert('Vyplňte prosím Název, Autora, ISBN a Kód knihy.');
       return;
+    }
+
+    let finalCoverImage = coverImage;
+    if (!finalCoverImage) {
+      setIsFetchingCover(true);
+      try {
+        const res = await fetchNewestCoverResultFromKnihovny({ title, author, isbn });
+        if (res && res.url) {
+          finalCoverImage = res.url;
+        }
+      } catch {
+        // ignore fallback errors
+      } finally {
+        setIsFetchingCover(false);
+      }
     }
 
     if (editingBookId) {
@@ -97,7 +140,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           description,
           status,
           location,
-          coverImage,
+          coverImage: finalCoverImage,
         });
       }
     } else {
@@ -112,7 +155,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         description,
         status,
         location,
-        coverImage,
+        coverImage: finalCoverImage,
       });
     }
 
@@ -283,15 +326,49 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   </select>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">URL Obálky (Volitelné)</label>
-                  <input
-                    type="text"
-                    value={coverImage}
-                    onChange={(e) => setCoverImage(e.target.value)}
-                    placeholder="https://images.unsplash.com/..."
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
+                <div className="md:col-span-2 bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <label className="block text-xs font-semibold text-slate-700 uppercase">
+                      Přebal knihy (Z Knihovny.cz / URL)
+                    </label>
+                    <button
+                      type="button"
+                      onClick={handleFetchKnihovnyCover}
+                      disabled={isFetchingCover}
+                      className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
+                    >
+                      {isFetchingCover ? (
+                        <RefreshCw size={13} className="animate-spin" />
+                      ) : (
+                        <Sparkles size={13} className="text-amber-300" />
+                      )}
+                      <span>Vyhledat nejnovější přebal na Knihovny.cz</span>
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-16 bg-white rounded-lg border border-slate-200 overflow-hidden shrink-0 shadow-sm flex items-center justify-center text-slate-300">
+                      {coverImage ? (
+                        <img src={coverImage} alt="Přebal knihy" className="w-full h-full object-cover" />
+                      ) : (
+                        <BookOpen size={20} />
+                      )}
+                    </div>
+                    <div className="flex-1 space-y-1">
+                      <input
+                        type="text"
+                        value={coverImage}
+                        onChange={(e) => setCoverImage(e.target.value)}
+                        placeholder="https://... (nebo použijte vyhledání výše)"
+                        className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+                      />
+                      {coverNote && (
+                        <p className="text-[11px] text-indigo-700 font-semibold flex items-center gap-1">
+                          <Sparkles size={11} className="text-indigo-500" /> {coverNote}
+                        </p>
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -347,6 +424,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           <table className="w-full text-left text-xs text-slate-600">
             <thead className="bg-slate-50 uppercase text-[11px] font-bold text-slate-600 border-b border-slate-200">
               <tr>
+                <th className="py-3 px-4">Přebal</th>
                 <th className="py-3 px-4">Kód & ISBN</th>
                 <th className="py-3 px-4">Kniha / Autor</th>
                 <th className="py-3 px-4">Kategorie</th>
@@ -358,6 +436,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             <tbody className="divide-y divide-slate-100 font-medium">
               {filteredBooks.map((book) => (
                 <tr key={book.id} className="hover:bg-slate-50/80 transition">
+                  <td className="py-3 px-4 whitespace-nowrap">
+                    <div className="w-10 h-14 bg-slate-100 rounded-lg overflow-hidden border border-slate-200 shadow-sm flex items-center justify-center shrink-0">
+                      {book.coverImage ? (
+                        <img src={book.coverImage} alt={book.title} className="w-full h-full object-cover" />
+                      ) : (
+                        <BookOpen size={16} className="text-slate-300" />
+                      )}
+                    </div>
+                  </td>
+
                   <td className="py-3 px-4 whitespace-nowrap">
                     <div className="font-mono font-bold text-slate-800">{book.code}</div>
                     <div className="text-[10px] text-slate-600 font-mono">{book.isbn}</div>
