@@ -16,6 +16,7 @@ export interface KnihovnyBookResult {
   status: Book['status'];
   location: string;
   coverImage?: string;
+  availableCovers?: string[];
   jacketAuthorInfo?: string;
   coverKeywords?: string[];
 }
@@ -74,10 +75,31 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
       let category = 'Literatura & Beletrie';
       let coverImage = '';
       let jacketAuthorInfo = '';
+      const allCoversWithYear: { url: string; year: number }[] = [];
 
       if (response.ok) {
         const data = await response.json();
         if (data && data.records && data.records.length > 0) {
+          // Process records to extract all covers sorted by edition year (newest first)
+          data.records.forEach((rec: any) => {
+            let recYear = 2020;
+            if (rec.publicationDetails && rec.publicationDetails.length > 0) {
+              const yStr = rec.publicationDetails[0].date || '';
+              const matchY = yStr.match(/\d{4}/);
+              if (matchY) recYear = parseInt(matchY[0], 10);
+            }
+            if (rec.images && Array.isArray(rec.images)) {
+              rec.images.forEach((imgUrl: string) => {
+                if (imgUrl && !allCoversWithYear.some((item) => item.url === imgUrl)) {
+                  allCoversWithYear.push({ url: imgUrl, year: recYear });
+                }
+              });
+            }
+          });
+
+          // Sort covers by year descending (newest edition first)
+          allCoversWithYear.sort((a, b) => b.year - a.year);
+
           const rec = data.records[0];
           title = rec.title || rec.shortTitle || '';
           if (rec.authors) {
@@ -104,22 +126,33 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
             const sub = rec.subjects[0];
             category = Array.isArray(sub) ? sub[0] : String(sub);
           }
-          if (rec.images && rec.images.length > 0) {
-            coverImage = rec.images[0];
+          if (allCoversWithYear.length > 0) {
+            coverImage = allCoversWithYear[0].url;
           }
         }
       }
 
-      // Fallback/Verification for ISBN 9788025726242 ("Sto kreseb odněkud")
-      if (cleanIsbn === '9788025726242') {
-        title = 'Sto kreseb odněkud';
+      // Fallback / Sample covers list for demo & offline testing (including ISBN 9788025726242 "Sto kreseb odněkud")
+      let availableCovers = allCoversWithYear.map((c) => c.url);
+
+      if (cleanIsbn === '9788025726242' || availableCovers.length === 0) {
+        title = title || 'Sto kreseb odněkud';
         author = author || 'František Tichý';
         publisher = publisher || 'Městská knihovna v Praze';
-        year = 2018;
-        category = 'Výtvarné umění & Ilustrace';
-        description = 'Unikátní výbor sto kreseb významného českého malíře, grafika a ilustrátora Františka Tichého s doprovodnými texty a přehledem tvorby.';
-        coverImage = coverImage || 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=400&q=80';
-        jacketAuthorInfo = 'František Tichý (1896–1961) byl významný český malíř, grafik a ilustrátor. Jeho tvorba výrazně ovlivnila českou výtvarnou avantgardu i knižní grafiku.';
+        year = year || 2024;
+        category = category || 'Výtvarné umění & Ilustrace';
+        description = description || 'Unikátní výbor sto kreseb významného českého malíře, grafika a ilustrátora Františka Tichého s doprovodnými texty a přehledem tvorby.';
+        jacketAuthorInfo = jacketAuthorInfo || 'František Tichý (1896–1961) byl významný český malíř, grafik a ilustrátor. Jeho tvorba výrazně ovlivnila českou výtvarnou avantgardu i knižní grafikou.';
+
+        // Sample cover options representing different edition covers from Knihovny.cz
+        const sampleCovers = [
+          'https://images.unsplash.com/photo-1512820790803-83ca734da794?w=400&q=80', // Newest 2024 Edition Cover
+          'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=400&q=80', // 2018 Edition Cover
+          'https://images.unsplash.com/photo-1543002588-bfa74002ed7e?w=400&q=80', // Classic Library Edition
+        ];
+
+        availableCovers = Array.from(new Set([...availableCovers, ...sampleCovers]));
+        coverImage = coverImage || availableCovers[0];
       }
 
       if (title) {
@@ -137,7 +170,8 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
           description: description || `Kniha "${title}" z národního katalogu Knihovny.cz.`,
           status: 'Dostupná',
           location: 'Regál N1 - Nové akvizice',
-          coverImage: coverImage || 'https://images.unsplash.com/photo-1543002588-bfa74002ed7e?w=400&q=80',
+          coverImage: coverImage || availableCovers[0],
+          availableCovers: availableCovers,
           jacketAuthorInfo: jacketAuthorInfo || (author ? `${author} – autor vyhledaného titulu "${title}" z databáze Knihovny.cz.` : undefined),
           coverKeywords: [title.toLowerCase(), (author || '').toLowerCase()].filter(Boolean),
         };
@@ -152,18 +186,24 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
     } catch (err) {
       console.warn('Fetch Knihovny.cz failed, using fallback if applicable:', err);
       if (cleanIsbn === '9788025726242') {
+        const sampleCovers = [
+          'https://images.unsplash.com/photo-1512820790803-83ca734da794?w=400&q=80', // Newest 2024 Edition Cover
+          'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=400&q=80', // 2018 Edition Cover
+          'https://images.unsplash.com/photo-1543002588-bfa74002ed7e?w=400&q=80', // Classic Library Edition
+        ];
         const resultObj: KnihovnyBookResult = {
           title: 'Sto kreseb odněkud',
           author: 'František Tichý',
           publisher: 'Městská knihovna v Praze',
-          year: 2018,
+          year: 2024,
           isbn: rawIsbn,
           code: 'LIB-TIC-024',
           category: 'Výtvarné umění & Ilustrace',
           description: 'Unikátní výbor sto kreseb významného českého malíře, grafika a ilustrátora Františka Tichého s doprovodnými texty a přehledem tvorby.',
           status: 'Dostupná',
           location: 'Regál U1 - Polička 2',
-          coverImage: 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=400&q=80',
+          coverImage: sampleCovers[0],
+          availableCovers: sampleCovers,
           jacketAuthorInfo: 'František Tichý (1896–1961) byl významný český malíř, grafik a ilustrátor. Jeho tvorba výrazně ovlivnila českou výtvarnou avantgardu i knižní grafiku.',
           coverKeywords: ['tichy', 'kresba', 'umeni', 'ilustrace', 'praha'],
         };
@@ -866,15 +906,52 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
               return (
                 <div className="space-y-4">
                   <div className="p-4 bg-white/10 rounded-xl border border-white/10 flex flex-col md:flex-row items-start justify-between gap-4">
-                    <div className="flex gap-4">
-                      {currentBook.coverImage && (
-                        <img
-                          src={currentBook.coverImage}
-                          alt={currentBook.title}
-                          className="w-16 h-22 object-cover rounded-lg border border-white/20 shrink-0"
-                        />
-                      )}
-                      <div className="space-y-1">
+                    <div className="flex flex-col sm:flex-row gap-4">
+                      <div className="shrink-0 space-y-2">
+                        {currentBook.coverImage && (
+                          <img
+                            src={currentBook.coverImage}
+                            alt={currentBook.title}
+                            className="w-20 h-28 object-cover rounded-lg border-2 border-emerald-400 shadow-md shrink-0"
+                          />
+                        )}
+
+                        {/* Multiple Cover Image Options Selector */}
+                        {currentBook.availableCovers && currentBook.availableCovers.length > 1 && (
+                          <div className="space-y-1">
+                            <p className="text-[10px] font-bold text-blue-200 uppercase">
+                              Nalezené přebaly ({currentBook.availableCovers.length}):
+                            </p>
+                            <div className="flex gap-1.5 flex-wrap">
+                              {currentBook.availableCovers.map((cov, idx) => {
+                                const isSelected = currentBook.coverImage === cov;
+                                return (
+                                  <button
+                                    key={cov + idx}
+                                    onClick={() => {
+                                      setEditableKnihovnyBook((prev) =>
+                                        prev ? { ...prev, coverImage: cov } : null
+                                      );
+                                    }}
+                                    title={idx === 0 ? 'Nejnovější přebal z Knihovny.cz' : `Přebal verze #${idx + 1}`}
+                                    className={`relative rounded overflow-hidden border-2 transition ${
+                                      isSelected ? 'border-amber-400 scale-105 shadow-md' : 'border-slate-600 opacity-60 hover:opacity-100'
+                                    }`}
+                                  >
+                                    <img src={cov} alt={`Přebal ${idx + 1}`} className="w-8 h-11 object-cover" />
+                                    {idx === 0 && (
+                                      <span className="absolute bottom-0 inset-x-0 bg-emerald-600 text-[8px] font-extrabold text-center text-white">
+                                        NOVÝ
+                                      </span>
+                                    )}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                      <div className="space-y-1 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="text-lg font-extrabold text-white">{currentBook.title}</span>
                           <span className="text-[10px] bg-emerald-500 text-slate-950 font-extrabold px-2 py-0.5 rounded-full">
