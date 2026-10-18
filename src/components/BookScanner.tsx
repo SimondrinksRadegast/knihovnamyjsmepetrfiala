@@ -3,6 +3,7 @@ import type { Book } from '../types';
 import { ScanLine, Search, QrCode, BookCheck, CheckCircle, RefreshCw, Sparkles, Image as ImageIcon, BookOpen, Upload, UserCheck, FileText, Camera, CameraOff, AlertCircle, Plus } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
+import { fetchNewestCoverResultFromKnihovny } from '../services/knihovnyCover';
 
 export interface KnihovnyBookResult {
   title: string;
@@ -108,6 +109,16 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
             coverImage = rec.images[0];
           }
         }
+      }
+
+      // Query Knihovny.cz cover lookup service to pick the newest available edition cover
+      const newestCoverRes = await fetchNewestCoverResultFromKnihovny({
+        title,
+        author,
+        isbn: rawIsbn,
+      });
+      if (newestCoverRes && newestCoverRes.url) {
+        coverImage = newestCoverRes.url;
       }
 
       // Fallback/Verification for ISBN 9788025726242 ("Sto kreseb odněkud")
