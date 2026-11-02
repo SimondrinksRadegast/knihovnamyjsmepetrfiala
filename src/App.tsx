@@ -6,7 +6,7 @@ import { BookScanner } from './components/BookScanner';
 import { AdminPanel } from './components/AdminPanel';
 import { QRCodeGenerator } from './components/QRCodeGenerator';
 import { AuthModal } from './components/AuthModal';
-import { fetchNewestCoverFromKnihovny } from './services/knihovnyCover';
+import { fetchNewestCoverFromKnihovny, getReliableCoverUrl } from './services/knihovnyCover';
 import {
   loadBooks,
   saveBooks,
@@ -91,7 +91,7 @@ export function App() {
 
     const newBook: Book = {
       ...newBookData,
-      coverImage: coverImage || 'https://images.unsplash.com/photo-1543002588-bfa74002ed7e?w=400&q=80',
+      coverImage: coverImage || getReliableCoverUrl(newBookData),
       id: 'b-' + Date.now(),
       addedDate: new Date().toISOString().split('T')[0],
     };

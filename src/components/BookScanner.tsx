@@ -3,7 +3,7 @@ import type { Book } from '../types';
 import { ScanLine, Search, QrCode, BookCheck, CheckCircle, RefreshCw, Sparkles, Image as ImageIcon, BookOpen, Upload, UserCheck, FileText, Camera, CameraOff, AlertCircle, Plus } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
-import { fetchNewestCoverResultFromKnihovny } from '../services/knihovnyCover';
+import { fetchNewestCoverResultFromKnihovny, getReliableCoverUrl } from '../services/knihovnyCover';
 
 export interface KnihovnyBookResult {
   title: string;
@@ -883,6 +883,13 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
                           src={currentBook.coverImage}
                           alt={currentBook.title}
                           className="w-16 h-22 object-cover rounded-lg border border-white/20 shrink-0"
+                          onError={(e) => {
+                            const target = e.currentTarget;
+                            const fallback = getReliableCoverUrl(currentBook);
+                            if (target.src !== fallback) {
+                              target.src = fallback;
+                            }
+                          }}
                         />
                       )}
                       <div className="space-y-1">
@@ -1084,11 +1091,24 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
                 <div className="flex items-center gap-4">
                   <div className="w-12 h-16 bg-slate-200 rounded-lg overflow-hidden shrink-0 border border-slate-300">
                     {book.coverImage ? (
-                      <img src={book.coverImage} alt={book.title} className="w-full h-full object-cover" />
+                      <img
+                        src={book.coverImage}
+                        alt={book.title}
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          const target = e.currentTarget;
+                          const fallback = getReliableCoverUrl(book);
+                          if (target.src !== fallback) {
+                            target.src = fallback;
+                          }
+                        }}
+                      />
                     ) : (
-                      <div className="w-full h-full flex items-center justify-center text-slate-400">
-                        <BookCheck size={20} />
-                      </div>
+                      <img
+                        src={getReliableCoverUrl(book)}
+                        alt={book.title}
+                        className="w-full h-full object-cover"
+                      />
                     )}
                   </div>
 

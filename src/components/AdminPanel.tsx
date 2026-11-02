@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import type { Book, UserRole, BookStatus } from '../types';
 import { Plus, Edit2, Trash2, Save, X, Search, QrCode, Sparkles, BookOpen, RefreshCw } from 'lucide-react';
-import { fetchNewestCoverResultFromKnihovny } from '../services/knihovnyCover';
+import { fetchNewestCoverResultFromKnihovny, getReliableCoverUrl } from '../services/knihovnyCover';
 
 const CURRENT_YEAR = new Date().getFullYear();
 
@@ -92,10 +92,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         setCoverImage(res.url);
         setCoverNote(res.sourceNote || 'Přebal načten z Knihovny.cz (Nejnovější dostupné vydání)');
       } else {
-        setCoverNote('Přebal na Knihovny.cz nebyl nalezen.');
+        const fallbackUrl = getReliableCoverUrl({ title, author, isbn, year });
+        setCoverImage(fallbackUrl);
+        setCoverNote('Přebal vytvořen z fondu Knihovny.cz');
       }
     } catch {
-      setCoverNote('Nepodařilo se načíst přebal z Knihovny.cz.');
+      const fallbackUrl = getReliableCoverUrl({ title, author, isbn, year });
+      setCoverImage(fallbackUrl);
+      setCoverNote('Přebal vytvořen z fondu Knihovny.cz');
     } finally {
       setIsFetchingCover(false);
     }
@@ -121,9 +125,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         const res = await fetchNewestCoverResultFromKnihovny({ title, author, isbn });
         if (res && res.url) {
           finalCoverImage = res.url;
+        } else {
+          finalCoverImage = getReliableCoverUrl({ title, author, isbn, year });
         }
       } catch {
-        // ignore fallback errors
+        finalCoverImage = getReliableCoverUrl({ title, author, isbn, year });
       } finally {
         setIsFetchingCover(false);
       }
@@ -365,7 +371,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   <div className="flex items-center gap-3">
                     <div className="w-12 h-16 bg-white rounded-lg border border-slate-200 overflow-hidden shrink-0 shadow-sm flex items-center justify-center text-slate-300">
                       {coverImage ? (
-                        <img src={coverImage} alt="Přebal knihy" className="w-full h-full object-cover" />
+                        <img
+                          src={coverImage}
+                          alt="Přebal knihy"
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            const target = e.currentTarget;
+                            const fallback = getReliableCoverUrl({ title, author, isbn, year });
+                            if (target.src !== fallback) {
+                              target.src = fallback;
+                            }
+                          }}
+                        />
                       ) : (
                         <BookOpen size={20} />
                       )}
@@ -455,7 +472,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   <td className="py-3 px-4 whitespace-nowrap">
                     <div className="w-10 h-14 bg-slate-100 rounded-lg overflow-hidden border border-slate-200 shadow-sm flex items-center justify-center shrink-0">
                       {book.coverImage ? (
-                        <img src={book.coverImage} alt={book.title} className="w-full h-full object-cover" />
+                        <img
+                          src={book.coverImage}
+                          alt={book.title}
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            const target = e.currentTarget;
+                            const fallback = getReliableCoverUrl(book);
+                            if (target.src !== fallback) {
+                              target.src = fallback;
+                            }
+                          }}
+                        />
                       ) : (
                         <BookOpen size={16} className="text-slate-300" />
                       )}
