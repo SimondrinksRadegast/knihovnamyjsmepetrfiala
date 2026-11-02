@@ -3,7 +3,7 @@ import type { Book } from '../types';
 import { ScanLine, Search, QrCode, BookCheck, CheckCircle, RefreshCw, Sparkles, Image as ImageIcon, BookOpen, Upload, UserCheck, FileText, Camera, CameraOff, AlertCircle, Plus } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
-import { fetchNewestCoverResultFromKnihovny, getReliableCoverUrl } from '../services/knihovnyCover';
+import { fetchBookDetailsFromKnihovny, getReliableCoverUrl } from '../services/knihovnyCover';
 
 export interface KnihovnyBookResult {
   title: string;
@@ -17,6 +17,12 @@ export interface KnihovnyBookResult {
   status: Book['status'];
   location: string;
   coverImage?: string;
+  pageCount?: number;
+  language?: string;
+  edition?: string;
+  physicalDetails?: string;
+  sourceUrl?: string;
+  notes?: string;
   jacketAuthorInfo?: string;
   coverKeywords?: string[];
 }
@@ -64,93 +70,31 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
     setIsEditingNewBook(false);
 
     try {
-      const url = `https://www.knihovny.cz/api/v1/search?lookfor=${encodeURIComponent(cleanIsbn)}&type=ISN`;
-      const response = await fetch(url);
-
-      let title = '';
-      let author = '';
-      let publisher = '';
-      let year = 2024;
-      let description = '';
-      let category = 'Literatura & Beletrie';
-      let coverImage = '';
-      let jacketAuthorInfo = '';
-
-      if (response.ok) {
-        const data = await response.json();
-        if (data && data.records && data.records.length > 0) {
-          const rec = data.records[0];
-          title = rec.title || rec.shortTitle || '';
-          if (rec.authors) {
-            if (typeof rec.authors.primary === 'string') {
-              author = rec.authors.primary;
-            } else if (rec.authors.primary && typeof rec.authors.primary === 'object') {
-              author = Object.keys(rec.authors.primary)[0] || '';
-            }
-          }
-          if (rec.publicationDetails && rec.publicationDetails.length > 0) {
-            publisher = rec.publicationDetails[0].publisher || '';
-            const yStr = rec.publicationDetails[0].date || '';
-            const matchY = yStr.match(/\d{4}/);
-            if (matchY) year = parseInt(matchY[0], 10);
-          }
-          if (rec.summary && rec.summary.length > 0) {
-            description = rec.summary[0];
-          } else if (rec.description) {
-            description = Array.isArray(rec.description) ? rec.description[0] : rec.description;
-          }
-          if (rec.genres && rec.genres.length > 0) {
-            category = rec.genres[0];
-          } else if (rec.subjects && rec.subjects.length > 0) {
-            const sub = rec.subjects[0];
-            category = Array.isArray(sub) ? sub[0] : String(sub);
-          }
-          if (rec.images && rec.images.length > 0) {
-            coverImage = rec.images[0];
-          }
-        }
-      }
-
-      // Query Knihovny.cz cover lookup service to pick the newest available edition cover
-      const newestCoverRes = await fetchNewestCoverResultFromKnihovny({
-        title,
-        author,
-        isbn: rawIsbn,
-      });
-      if (newestCoverRes && newestCoverRes.url) {
-        coverImage = newestCoverRes.url;
-      }
-
-      // Fallback/Verification for ISBN 9788025726242 ("Sto kreseb odněkud")
-      if (cleanIsbn === '9788025726242') {
-        title = 'Sto kreseb odněkud';
-        author = author || 'František Tichý';
-        publisher = publisher || 'Městská knihovna v Praze';
-        year = 2018;
-        category = 'Výtvarné umění & Ilustrace';
-        description = 'Unikátní výbor sto kreseb významného českého malíře, grafika a ilustrátora Františka Tichého s doprovodnými texty a přehledem tvorby.';
-        coverImage = coverImage || 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=400&q=80';
-        jacketAuthorInfo = 'František Tichý (1896–1961) byl významný český malíř, grafik a ilustrátor. Jeho tvorba výrazně ovlivnila českou výtvarnou avantgardu i knižní grafiku.';
-      }
-
-      if (title) {
-        const cleanAuthorShort = author ? author.split(' ').pop()?.slice(0, 3).toUpperCase() || 'AUT' : 'KNI';
+      const details = await fetchBookDetailsFromKnihovny({ isbn: rawIsbn });
+      if (details && details.title) {
+        const cleanAuthorShort = details.author ? details.author.split(' ').pop()?.slice(0, 3).toUpperCase() || 'AUT' : 'KNI';
         const generatedCode = `LIB-${cleanAuthorShort}-${Math.floor(100 + Math.random() * 900)}`;
 
         const resultObj: KnihovnyBookResult = {
-          title,
-          author: author || 'Neznámý autor',
-          publisher: publisher || 'Městská knihovna',
-          year: year || 2024,
-          isbn: rawIsbn,
+          title: details.title,
+          author: details.author || 'Neznámý autor',
+          publisher: details.publisher || 'Městská knihovna',
+          year: details.year || 2024,
+          isbn: details.isbn || rawIsbn,
           code: generatedCode,
-          category: category || 'Literatura & Beletrie',
-          description: description || `Kniha "${title}" z národního katalogu Knihovny.cz.`,
+          category: details.category || 'Literatura & Beletrie',
+          description: details.description || `Kniha "${details.title}" z národního katalogu Knihovny.cz.`,
           status: 'Dostupná',
           location: 'Regál N1 - Nové akvizice',
-          coverImage: coverImage || 'https://images.unsplash.com/photo-1543002588-bfa74002ed7e?w=400&q=80',
-          jacketAuthorInfo: jacketAuthorInfo || (author ? `${author} – autor vyhledaného titulu "${title}" z databáze Knihovny.cz.` : undefined),
-          coverKeywords: [title.toLowerCase(), (author || '').toLowerCase()].filter(Boolean),
+          coverImage: details.coverImage,
+          pageCount: details.pageCount,
+          language: details.language,
+          edition: details.edition,
+          physicalDetails: details.physicalDetails,
+          sourceUrl: details.sourceUrl,
+          notes: details.notes,
+          jacketAuthorInfo: details.jacketAuthorInfo,
+          coverKeywords: details.coverKeywords,
         };
 
         setKnihovnyResult(resultObj);
@@ -162,29 +106,9 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
       }
     } catch (err) {
       console.warn('Fetch Knihovny.cz failed, using fallback if applicable:', err);
-      if (cleanIsbn === '9788025726242') {
-        const resultObj: KnihovnyBookResult = {
-          title: 'Sto kreseb odněkud',
-          author: 'František Tichý',
-          publisher: 'Městská knihovna v Praze',
-          year: 2018,
-          isbn: rawIsbn,
-          code: 'LIB-TIC-024',
-          category: 'Výtvarné umění & Ilustrace',
-          description: 'Unikátní výbor sto kreseb významného českého malíře, grafika a ilustrátora Františka Tichého s doprovodnými texty a přehledem tvorby.',
-          status: 'Dostupná',
-          location: 'Regál U1 - Polička 2',
-          coverImage: 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=400&q=80',
-          jacketAuthorInfo: 'František Tichý (1896–1961) byl významný český malíř, grafik a ilustrátor. Jeho tvorba výrazně ovlivnila českou výtvarnou avantgardu i knižní grafiku.',
-          coverKeywords: ['tichy', 'kresba', 'umeni', 'ilustrace', 'praha'],
-        };
-        setKnihovnyResult(resultObj);
-        setEditableKnihovnyBook(resultObj);
-      } else {
-        setKnihovnyResult(null);
-        setEditableKnihovnyBook(null);
-        setKnihovnyError('Chyba při vyhledávání na Knihovny.cz.');
-      }
+      setKnihovnyResult(null);
+      setEditableKnihovnyBook(null);
+      setKnihovnyError('Chyba při vyhledávání na Knihovny.cz.');
     } finally {
       setIsSearchingKnihovny(false);
     }
@@ -206,11 +130,17 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
       status: targetBook.status,
       location: targetBook.location,
       coverImage: targetBook.coverImage,
+      pageCount: targetBook.pageCount,
+      language: targetBook.language,
+      edition: targetBook.edition,
+      physicalDetails: targetBook.physicalDetails,
+      sourceUrl: targetBook.sourceUrl,
+      notes: targetBook.notes,
       jacketAuthorInfo: targetBook.jacketAuthorInfo,
       coverKeywords: targetBook.coverKeywords,
     });
 
-    setActionSuccessMessage(`Kniha "${targetBook.title}" byla úspěšně přidána do databáze knihovny!`);
+    setActionSuccessMessage(`Kniha "${targetBook.title}" byla úspěšně přidána do databáze knihovny se všemi informacemi z Knihovny.cz!`);
     setIsEditingNewBook(false);
     setTimeout(() => setActionSuccessMessage(null), 5000);
   };
@@ -920,8 +850,17 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
                           <span>Kód: {currentBook.code}</span>
                           {currentBook.publisher && <span>Nakladatel: {currentBook.publisher}</span>}
                           {currentBook.year && <span>Rok: {currentBook.year}</span>}
+                          {currentBook.pageCount && <span>Rozsah: {currentBook.pageCount} str.</span>}
+                          {currentBook.language && <span>Jazyk: {currentBook.language}</span>}
+                          {currentBook.edition && <span>Vydání: {currentBook.edition}</span>}
                           <span>Kategorie: {currentBook.category}</span>
                         </div>
+
+                        {currentBook.physicalDetails && (
+                          <p className="text-xs text-blue-200 mt-1 font-sans">
+                            <span className="font-semibold text-blue-100">Fyzický popis:</span> {currentBook.physicalDetails}
+                          </p>
+                        )}
 
                         {currentBook.description && (
                           <p className="text-xs text-blue-100/90 line-clamp-2 mt-2 font-sans bg-blue-950/40 p-2 rounded-lg border border-blue-800/50">
@@ -1026,6 +965,42 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
                             type="number"
                             value={editableKnihovnyBook.year}
                             onChange={(e) => setEditableKnihovnyBook({ ...editableKnihovnyBook, year: Number(e.target.value) })}
+                            className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] uppercase font-semibold text-slate-400 mb-1">Počet Stran</label>
+                          <input
+                            type="number"
+                            value={editableKnihovnyBook.pageCount || ''}
+                            onChange={(e) => setEditableKnihovnyBook({ ...editableKnihovnyBook, pageCount: e.target.value ? Number(e.target.value) : undefined })}
+                            className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] uppercase font-semibold text-slate-400 mb-1">Jazyk</label>
+                          <input
+                            type="text"
+                            value={editableKnihovnyBook.language || ''}
+                            onChange={(e) => setEditableKnihovnyBook({ ...editableKnihovnyBook, language: e.target.value })}
+                            className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] uppercase font-semibold text-slate-400 mb-1">Vydání</label>
+                          <input
+                            type="text"
+                            value={editableKnihovnyBook.edition || ''}
+                            onChange={(e) => setEditableKnihovnyBook({ ...editableKnihovnyBook, edition: e.target.value })}
+                            className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white"
+                          />
+                        </div>
+                        <div className="sm:col-span-2 md:col-span-3">
+                          <label className="block text-[10px] uppercase font-semibold text-slate-400 mb-1">Fyzický popis / Vazba</label>
+                          <input
+                            type="text"
+                            value={editableKnihovnyBook.physicalDetails || ''}
+                            onChange={(e) => setEditableKnihovnyBook({ ...editableKnihovnyBook, physicalDetails: e.target.value })}
                             className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white"
                           />
                         </div>
