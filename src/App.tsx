@@ -139,6 +139,7 @@ export function App() {
             books={books}
             searchQuery={searchQuery}
             userRole={userRole}
+            onEditBook={handleEditBook}
             onSelectBookForQR={handleSelectBookForQR}
             onQuickToggleStatus={handleUpdateBookStatus}
           />

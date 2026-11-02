@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import type { Book, UserRole, BookStatus } from '../types';
-import { Plus, Edit2, Trash2, Save, X, Search, QrCode, Sparkles, BookOpen, RefreshCw } from 'lucide-react';
-import { fetchNewestCoverResultFromKnihovny, getReliableCoverUrl } from '../services/knihovnyCover';
+import { Plus, Edit2, Trash2, Save, X, Search, QrCode, Sparkles, BookOpen, RefreshCw, ExternalLink, CheckCircle2 } from 'lucide-react';
+import { fetchNewestCoverResultFromKnihovny, fetchBookDetailsFromKnihovny, getReliableCoverUrl } from '../services/knihovnyCover';
 
 const CURRENT_YEAR = new Date().getFullYear();
 
@@ -44,6 +44,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [isFetchingCover, setIsFetchingCover] = useState(false);
   const [coverNote, setCoverNote] = useState<string | null>(null);
 
+  // Knihovny.cz extended attributes state
+  const [pageCount, setPageCount] = useState<number | undefined>(undefined);
+  const [language, setLanguage] = useState('Čeština');
+  const [edition, setEdition] = useState('');
+  const [physicalDetails, setPhysicalDetails] = useState('');
+  const [sourceUrl, setSourceUrl] = useState('');
+  const [notes, setNotes] = useState('');
+  const [jacketAuthorInfo, setJacketAuthorInfo] = useState('');
+  const [isFetchingKnihovnyAll, setIsFetchingKnihovnyAll] = useState(false);
+  const [knihovnySuccessNote, setKnihovnySuccessNote] = useState<string | null>(null);
+  const [notificationMsg, setNotificationMsg] = useState<string | null>(null);
+
   const resetForm = () => {
     setTitle('');
     setAuthor('');
@@ -57,7 +69,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setLocation('Regál A1 - Polička 1');
     setCoverImage('');
     setCoverNote(null);
+    setPageCount(undefined);
+    setLanguage('Čeština');
+    setEdition('');
+    setPhysicalDetails('');
+    setSourceUrl('');
+    setNotes('');
+    setJacketAuthorInfo('');
     setIsFetchingCover(false);
+    setIsFetchingKnihovnyAll(false);
+    setKnihovnySuccessNote(null);
     setEditingBookId(null);
     setIsFormOpen(false);
   };
@@ -76,7 +97,53 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setLocation(book.location);
     setCoverImage(book.coverImage || '');
     setCoverNote(null);
+    setPageCount(book.pageCount);
+    setLanguage(book.language || 'Čeština');
+    setEdition(book.edition || '');
+    setPhysicalDetails(book.physicalDetails || '');
+    setSourceUrl(book.sourceUrl || '');
+    setNotes(book.notes || '');
+    setJacketAuthorInfo(book.jacketAuthorInfo || '');
+    setKnihovnySuccessNote(null);
     setIsFormOpen(true);
+  };
+
+  const handleFetchAllFromKnihovny = async () => {
+    if (!isbn && !title) {
+      alert('Zadejte prosím nejprve ISBN nebo Název knihy pro načtení informací z Knihovny.cz.');
+      return;
+    }
+
+    setIsFetchingKnihovnyAll(true);
+    setKnihovnySuccessNote(null);
+    try {
+      const details = await fetchBookDetailsFromKnihovny({ title, author, isbn });
+      if (details) {
+        if (details.title && (!title || title === 'Nová kniha')) setTitle(details.title);
+        if (details.author && (!author || author === 'Neznámý autor')) setAuthor(details.author);
+        if (details.isbn && !isbn) setIsbn(details.isbn);
+        if (details.publisher) setPublisher(details.publisher);
+        if (details.year) setYear(details.year);
+        if (details.category) setCategory(details.category);
+        if (details.description) setDescription(details.description);
+        if (details.coverImage) setCoverImage(details.coverImage);
+        if (details.pageCount) setPageCount(details.pageCount);
+        if (details.language) setLanguage(details.language);
+        if (details.edition) setEdition(details.edition);
+        if (details.physicalDetails) setPhysicalDetails(details.physicalDetails);
+        if (details.sourceUrl) setSourceUrl(details.sourceUrl);
+        if (details.notes) setNotes(details.notes);
+        if (details.jacketAuthorInfo) setJacketAuthorInfo(details.jacketAuthorInfo);
+
+        setKnihovnySuccessNote(`Informace byly úspěšně načteny (${details.sourceNote || 'Knihovny.cz'}). Všechna pole můžete nyní ručně upravit.`);
+      } else {
+        alert('Pro zadané údaje nebyly na Knihovny.cz nalezeny žádné podrobnosti.');
+      }
+    } catch {
+      alert('Nepodařilo se připojit k databázi Knihovny.cz.');
+    } finally {
+      setIsFetchingKnihovnyAll(false);
+    }
   };
 
   const handleFetchKnihovnyCover = async () => {
@@ -119,20 +186,43 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }
 
     let finalCoverImage = coverImage;
-    if (!finalCoverImage) {
-      setIsFetchingCover(true);
+    let finalPublisher = publisher;
+    let finalYear = Number(year);
+    let finalCategory = category;
+    let finalDescription = description;
+    let finalPageCount = pageCount;
+    let finalLanguage = language;
+    let finalEdition = edition;
+    let finalPhysicalDetails = physicalDetails;
+    let finalSourceUrl = sourceUrl;
+    let finalNotes = notes;
+    let finalJacketAuthorInfo = jacketAuthorInfo;
+
+    // If adding a new book and some Knihovny.cz fields are empty, auto-fetch from Knihovny.cz
+    if (!editingBookId && (!finalCoverImage || !finalPageCount || !finalSourceUrl || !finalPhysicalDetails)) {
       try {
-        const res = await fetchNewestCoverResultFromKnihovny({ title, author, isbn });
-        if (res && res.url) {
-          finalCoverImage = res.url;
-        } else {
-          finalCoverImage = getReliableCoverUrl({ title, author, isbn, year });
+        const details = await fetchBookDetailsFromKnihovny({ title, author, isbn });
+        if (details) {
+          if (!finalCoverImage && details.coverImage) finalCoverImage = details.coverImage;
+          if (!finalPublisher && details.publisher) finalPublisher = details.publisher;
+          if ((!finalYear || finalYear === CURRENT_YEAR) && details.year) finalYear = details.year;
+          if (!finalDescription && details.description) finalDescription = details.description;
+          if (!finalCategory && details.category) finalCategory = details.category;
+          if (!finalPageCount && details.pageCount) finalPageCount = details.pageCount;
+          if (!finalLanguage && details.language) finalLanguage = details.language;
+          if (!finalEdition && details.edition) finalEdition = details.edition;
+          if (!finalPhysicalDetails && details.physicalDetails) finalPhysicalDetails = details.physicalDetails;
+          if (!finalSourceUrl && details.sourceUrl) finalSourceUrl = details.sourceUrl;
+          if (!finalNotes && details.notes) finalNotes = details.notes;
+          if (!finalJacketAuthorInfo && details.jacketAuthorInfo) finalJacketAuthorInfo = details.jacketAuthorInfo;
         }
       } catch {
-        finalCoverImage = getReliableCoverUrl({ title, author, isbn, year });
-      } finally {
-        setIsFetchingCover(false);
+        // Continue with user provided inputs
       }
+    }
+
+    if (!finalCoverImage) {
+      finalCoverImage = getReliableCoverUrl({ title, author, isbn, year: finalYear });
     }
 
     if (editingBookId) {
@@ -144,14 +234,22 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           author,
           isbn,
           code,
-          category,
-          year: Number(year),
-          publisher,
-          description,
+          category: finalCategory,
+          year: finalYear,
+          publisher: finalPublisher,
+          description: finalDescription,
           status,
           location,
           coverImage: finalCoverImage,
+          pageCount: finalPageCount,
+          language: finalLanguage,
+          edition: finalEdition,
+          physicalDetails: finalPhysicalDetails,
+          sourceUrl: finalSourceUrl,
+          notes: finalNotes,
+          jacketAuthorInfo: finalJacketAuthorInfo,
         });
+        setNotificationMsg(`Kniha "${title}" byla úspěšně upravena.`);
       }
     } else {
       onAddBook({
@@ -159,16 +257,25 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         author,
         isbn,
         code,
-        category,
-        year: Number(year),
-        publisher,
-        description,
+        category: finalCategory,
+        year: finalYear,
+        publisher: finalPublisher,
+        description: finalDescription,
         status,
         location,
         coverImage: finalCoverImage,
+        pageCount: finalPageCount,
+        language: finalLanguage,
+        edition: finalEdition,
+        physicalDetails: finalPhysicalDetails,
+        sourceUrl: finalSourceUrl,
+        notes: finalNotes,
+        jacketAuthorInfo: finalJacketAuthorInfo,
       });
+      setNotificationMsg(`Kniha "${title}" byla přidána do databáze s informacemi z Knihovny.cz.`);
     }
 
+    setTimeout(() => setNotificationMsg(null), 5000);
     resetForm();
   };
 
@@ -182,6 +289,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   return (
     <div className="space-y-6">
+      {notificationMsg && (
+        <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-3 rounded-xl text-sm flex items-center gap-3 shadow-sm animate-in fade-in slide-in-from-top-2">
+          <CheckCircle2 className="text-emerald-600 shrink-0" size={20} />
+          <span className="font-medium">{notificationMsg}</span>
+        </div>
+      )}
+
       {/* Header Banner */}
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200/80 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
@@ -238,6 +352,38 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-4">
+              {/* Knihovny.cz auto fetch banner */}
+              <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-3.5 rounded-xl border border-blue-200/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div className="text-xs">
+                  <span className="font-bold text-blue-900 flex items-center gap-1.5">
+                    <Sparkles size={14} className="text-blue-600" /> Automatické doplnění z Knihovny.cz
+                  </span>
+                  <p className="text-slate-600 mt-0.5">
+                    Zadejte ISBN nebo název a jedním kliknutím načtěte veškeré údaje, popis i přebal z národní databáze.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleFetchAllFromKnihovny}
+                  disabled={isFetchingKnihovnyAll}
+                  className="shrink-0 px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
+                >
+                  {isFetchingKnihovnyAll ? (
+                    <RefreshCw size={13} className="animate-spin" />
+                  ) : (
+                    <BookOpen size={13} />
+                  )}
+                  <span>{isFetchingKnihovnyAll ? 'Načítám...' : 'Načíst vše z Knihovny.cz'}</span>
+                </button>
+              </div>
+
+              {knihovnySuccessNote && (
+                <div className="bg-emerald-50 text-emerald-800 border border-emerald-200 px-3 py-2 rounded-lg text-xs flex items-center gap-2">
+                  <CheckCircle2 size={15} className="text-emerald-600 shrink-0" />
+                  <span>{knihovnySuccessNote}</span>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Název knihy *</label>
@@ -249,6 +395,75 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     placeholder="Babička"
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
+                </div>
+
+                {/* Knihovny.cz Extended Fields */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Počet stran (Knihovny.cz)</label>
+                  <input
+                    type="number"
+                    value={pageCount !== undefined ? pageCount : ''}
+                    onChange={(e) => setPageCount(e.target.value ? Number(e.target.value) : undefined)}
+                    placeholder="Např. 352"
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Jazyk publikace</label>
+                  <input
+                    type="text"
+                    value={language}
+                    onChange={(e) => setLanguage(e.target.value)}
+                    placeholder="Čeština"
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Vydání</label>
+                  <input
+                    type="text"
+                    value={edition}
+                    onChange={(e) => setEdition(e.target.value)}
+                    placeholder="1. vydání"
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Fyzický popis / Vazba</label>
+                  <input
+                    type="text"
+                    value={physicalDetails}
+                    onChange={(e) => setPhysicalDetails(e.target.value)}
+                    placeholder="Vázaná vazba s přebalem, 20 cm"
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Odkaz na záznam Knihovny.cz</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={sourceUrl}
+                      onChange={(e) => setSourceUrl(e.target.value)}
+                      placeholder="https://www.knihovny.cz/Search/Results?..."
+                      className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-xs font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    {sourceUrl && (
+                      <a
+                        href={sourceUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-medium flex items-center gap-1 border border-slate-200 shrink-0"
+                      >
+                        <ExternalLink size={13} />
+                        <span>Otevřít</span>
+                      </a>
+                    )}
+                  </div>
                 </div>
 
                 <div>
@@ -406,12 +621,23 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Anotace / Popisek</label>
+                <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Anotace / Popisek (Knihovny.cz)</label>
                 <textarea
                   rows={3}
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   placeholder="Detailní popis knižního titulu..."
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                ></textarea>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Poznámky k fondu / exempláři (Knihovny.cz)</label>
+                <textarea
+                  rows={2}
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Interní poznámka k exempláři z fondu Knihovny.cz..."
                   className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 ></textarea>
               </div>
@@ -498,6 +724,23 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   <td className="py-3 px-4">
                     <div className="font-bold text-slate-900 text-sm">{book.title}</div>
                     <div className="text-slate-600">{book.author} ({book.year})</div>
+                    {(book.pageCount || book.language || book.sourceUrl) && (
+                      <div className="text-[11px] text-slate-500 flex items-center gap-2 mt-0.5">
+                        {book.pageCount && <span>{book.pageCount} str.</span>}
+                        {book.language && <span>• {book.language}</span>}
+                        {book.sourceUrl && (
+                          <a
+                            href={book.sourceUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-600 hover:underline flex items-center gap-0.5"
+                          >
+                            <span>Knihovny.cz</span>
+                            <ExternalLink size={10} />
+                          </a>
+                        )}
+                      </div>
+                    )}
                   </td>
 
                   <td className="py-3 px-4 whitespace-nowrap">{book.category}</td>

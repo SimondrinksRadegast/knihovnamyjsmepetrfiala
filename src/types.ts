@@ -17,6 +17,12 @@ export interface Book {
   coverImage?: string;
   jacketAuthorInfo?: string; // Informace o autorovi na přebalu knihy (medailonek, biografie)
   coverKeywords?: string[]; // Klíčová slova vizuálního obalu
+  pageCount?: number; // Počet stran / rozsah z Knihovny.cz
+  language?: string; // Jazyk vydání (např. Čeština)
+  edition?: string; // Vydání (např. 1. vydání)
+  physicalDetails?: string; // Fyzický popis vazby a rozměrů z Knihovny.cz
+  sourceUrl?: string; // Odkaz na záznam v Knihovny.cz
+  notes?: string; // Poznámky z fondu Knihovny.cz
   addedDate: string;
   borrowedBy?: string;
 }
