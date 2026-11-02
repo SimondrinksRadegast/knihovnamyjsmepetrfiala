@@ -3,6 +3,8 @@ import type { Book, UserRole, BookStatus } from '../types';
 import { Plus, Edit2, Trash2, Save, X, Search, QrCode, Sparkles, BookOpen, RefreshCw } from 'lucide-react';
 import { fetchNewestCoverResultFromKnihovny } from '../services/knihovnyCover';
 
+const CURRENT_YEAR = new Date().getFullYear();
+
 interface AdminPanelProps {
   books: Book[];
   userRole: UserRole;
@@ -10,6 +12,7 @@ interface AdminPanelProps {
   onEditBook: (book: Book) => void;
   onDeleteBook: (bookId: string) => void;
   onSelectBookForQR: (book: Book) => void;
+  onResetData?: () => void;
 }
 
 export const AdminPanel: React.FC<AdminPanelProps> = ({
@@ -19,6 +22,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   onEditBook,
   onDeleteBook,
   onSelectBookForQR,
+  onResetData,
 }) => {
   const isLeader = userRole === 'vedouci';
   const [filterQuery, setFilterQuery] = useState('');
@@ -31,7 +35,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [isbn, setIsbn] = useState('');
   const [code, setCode] = useState('');
   const [category, setCategory] = useState('Česká klasika');
-  const [year, setYear] = useState(new Date().getFullYear());
+  const [year, setYear] = useState(CURRENT_YEAR);
   const [publisher, setPublisher] = useState('');
   const [description, setDescription] = useState('');
   const [status, setStatus] = useState<BookStatus>('Dostupná');
@@ -46,7 +50,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setIsbn('');
     setCode('');
     setCategory('Česká klasika');
-    setYear(new Date().getFullYear());
+    setYear(CURRENT_YEAR);
     setPublisher('');
     setDescription('');
     setStatus('Dostupná');
@@ -192,13 +196,25 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           </p>
         </div>
 
-        <button
-          onClick={handleStartAdd}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl font-medium text-sm transition shadow-sm flex items-center gap-2 shrink-0"
-        >
-          <Plus size={18} />
-          <span>Přidat novou knihu</span>
-        </button>
+        <div className="flex items-center gap-2 shrink-0 flex-wrap">
+          {onResetData && (
+            <button
+              onClick={onResetData}
+              title="Obnovit výchozí vzorovou databázi"
+              className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3.5 py-2.5 rounded-xl font-medium text-xs transition border border-slate-300 flex items-center gap-1.5"
+            >
+              <RefreshCw size={15} />
+              <span>Obnovit výchozí data</span>
+            </button>
+          )}
+          <button
+            onClick={handleStartAdd}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl font-medium text-sm transition shadow-sm flex items-center gap-2"
+          >
+            <Plus size={18} />
+            <span>Přidat novou knihu</span>
+          </button>
+        </div>
       </div>
 
       {/* Add / Edit Form Drawer/Modal */}
