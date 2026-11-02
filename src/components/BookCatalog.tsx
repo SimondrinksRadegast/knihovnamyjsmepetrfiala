@@ -1,6 +1,7 @@
 import React from 'react';
 import type { Book, UserRole } from '../types';
 import { BookOpen, MapPin, Tag, CheckCircle, Clock, AlertTriangle, QrCode, ArrowRight, X } from 'lucide-react';
+import { getReliableCoverUrl } from '../services/knihovnyCover';
 import { QRCodeSVG } from 'qrcode.react';
 
 interface BookCatalogProps {
@@ -139,11 +140,24 @@ export const BookCatalog: React.FC<BookCatalogProps> = ({
                 {/* Book Cover or Placeholder */}
                 <div className="w-24 h-36 bg-slate-100 rounded-xl overflow-hidden shrink-0 shadow-inner border border-slate-200 relative group-hover:scale-105 transition-transform duration-200">
                   {book.coverImage ? (
-                    <img src={book.coverImage} alt={book.title} className="w-full h-full object-cover" />
+                    <img
+                      src={book.coverImage}
+                      alt={book.title}
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        const target = e.currentTarget;
+                        const fallback = getReliableCoverUrl(book);
+                        if (target.src !== fallback) {
+                          target.src = fallback;
+                        }
+                      }}
+                    />
                   ) : (
-                    <div className="w-full h-full flex items-center justify-center text-slate-300">
-                      <BookOpen size={32} />
-                    </div>
+                    <img
+                      src={getReliableCoverUrl(book)}
+                      alt={book.title}
+                      className="w-full h-full object-cover"
+                    />
                   )}
                 </div>
 
@@ -213,11 +227,24 @@ export const BookCatalog: React.FC<BookCatalogProps> = ({
                 <div className="space-y-4 text-center">
                   <div className="w-full aspect-[2/3] bg-slate-100 rounded-xl overflow-hidden shadow-sm border border-slate-200">
                     {activeBook.coverImage ? (
-                      <img src={activeBook.coverImage} alt={activeBook.title} className="w-full h-full object-cover" />
+                      <img
+                        src={activeBook.coverImage}
+                        alt={activeBook.title}
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          const target = e.currentTarget;
+                          const fallback = getReliableCoverUrl(activeBook);
+                          if (target.src !== fallback) {
+                            target.src = fallback;
+                          }
+                        }}
+                      />
                     ) : (
-                      <div className="w-full h-full flex items-center justify-center text-slate-300">
-                        <BookOpen size={48} />
-                      </div>
+                      <img
+                        src={getReliableCoverUrl(activeBook)}
+                        alt={activeBook.title}
+                        className="w-full h-full object-cover"
+                      />
                     )}
                   </div>
 
