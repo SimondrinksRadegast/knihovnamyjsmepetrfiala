@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import type { Book } from '../types';
-import { ScanLine, Search, QrCode, BookCheck, CheckCircle, RefreshCw, Sparkles, Image as ImageIcon, BookOpen, Upload, UserCheck, FileText, Camera, CameraOff, AlertCircle, Plus } from 'lucide-react';
+import { ScanLine, Search, QrCode, BookCheck, CheckCircle, RefreshCw, Sparkles, Image as ImageIcon, BookOpen, Upload, UserCheck, FileText, Camera, CameraOff, AlertCircle, Plus, Play, PauseCircle } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { fetchBookDetailsFromKnihovny, getReliableCoverUrl } from '../services/knihovnyCover';
@@ -45,6 +45,8 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [isCameraLoading, setIsCameraLoading] = useState(false);
+  const [isScanPaused, setIsScanPaused] = useState(false);
+  const isScanPausedRef = useRef(false);
   const html5QrcodeRef = useRef<Html5Qrcode | null>(null);
 
   // Cover image / Jacket OCR state
@@ -267,7 +269,35 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
     setTimeout(() => setActionSuccessMessage(null), 4000);
   };
 
+  const handleResumeScanning = () => {
+    isScanPausedRef.current = false;
+    setIsScanPaused(false);
+    if (html5QrcodeRef.current) {
+      try {
+        html5QrcodeRef.current.resume();
+      } catch (err) {
+        console.warn('Error resuming scanner:', err);
+      }
+    }
+  };
+
   const handleDecodedCode = (decodedText: string) => {
+    if (isScanPausedRef.current) {
+      return;
+    }
+
+    // Immediately pause repeated scans until explicitly enabled by user
+    isScanPausedRef.current = true;
+    setIsScanPaused(true);
+
+    if (html5QrcodeRef.current && html5QrcodeRef.current.isScanning) {
+      try {
+        html5QrcodeRef.current.pause(true);
+      } catch (err) {
+        console.warn('Error pausing scanner:', err);
+      }
+    }
+
     let cleanCode = decodedText.trim();
     // If QR code format is LIB:CODE:ISBN, extract code or search string
     if (cleanCode.startsWith('LIB:')) {
@@ -302,6 +332,8 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
   };
 
   const stopCamera = async () => {
+    isScanPausedRef.current = false;
+    setIsScanPaused(false);
     if (html5QrcodeRef.current) {
       try {
         if (html5QrcodeRef.current.isScanning) {
@@ -320,6 +352,8 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
   const startCamera = async () => {
     setCameraError(null);
     setIsCameraLoading(true);
+    isScanPausedRef.current = false;
+    setIsScanPaused(false);
 
     // Ensure secure context (HTTPS or localhost) for camera access in mobile browsers
     if (!window.isSecureContext && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
@@ -707,8 +741,26 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
           <div className="absolute inset-0 bg-[radial-gradient(#3b82f6_1px,transparent_1px)] [background-size:16px_16px] opacity-20"></div>
 
           {/* Live Camera Viewport */}
-          <div className={`w-full overflow-hidden rounded-xl border border-slate-700 bg-black z-10 mb-4 ${isCameraActive ? 'block' : 'hidden'}`}>
+          <div className={`w-full overflow-hidden rounded-xl border border-slate-700 bg-black z-10 mb-4 relative ${isCameraActive ? 'block' : 'hidden'}`}>
             <div id="qr-reader" className="w-full"></div>
+            {isScanPaused && (
+              <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-xs flex flex-col items-center justify-center p-4 text-center z-20">
+                <div className="w-12 h-12 bg-emerald-500/20 text-emerald-400 rounded-full flex items-center justify-center mb-2 border border-emerald-500/40">
+                  <CheckCircle size={28} />
+                </div>
+                <p className="font-bold text-white text-sm">Kniha úspěšně rozpoznána</p>
+                <p className="text-xs text-slate-300 mt-1 mb-3 max-w-xs">
+                  Skenování je pozastaveno, aby se kód neopakoval. Pro načtení další knihy povolte pokračování.
+                </p>
+                <button
+                  onClick={handleResumeScanning}
+                  className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl text-xs transition flex items-center gap-1.5 shadow-lg shadow-emerald-500/20"
+                >
+                  <Play size={15} />
+                  <span>Skenovat další knihu</span>
+                </button>
+              </div>
+            )}
           </div>
 
           {isCameraLoading ? (
@@ -748,7 +800,7 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
           )}
 
           {/* Action buttons to Start / Stop Camera */}
-          <div className="z-10 mt-3 flex items-center gap-2">
+          <div className="z-10 mt-3 flex flex-wrap items-center justify-center gap-2">
             {!isCameraActive ? (
               <button
                 onClick={startCamera}
@@ -759,19 +811,45 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
                 <span>{isCameraLoading ? 'Načítání...' : 'Spustit Kameru Mobilu'}</span>
               </button>
             ) : (
-              <button
-                onClick={stopCamera}
-                className="px-4 py-2.5 bg-red-600 hover:bg-red-500 active:bg-red-700 text-white font-bold rounded-xl text-xs transition flex items-center gap-2 shadow-lg shadow-red-600/30"
-              >
-                <CameraOff size={16} />
-                <span>Vypnout Kameru</span>
-              </button>
+              <>
+                {isScanPaused ? (
+                  <button
+                    onClick={handleResumeScanning}
+                    className="px-4 py-2.5 bg-emerald-500 hover:bg-emerald-400 active:bg-emerald-600 text-slate-950 font-extrabold rounded-xl text-xs transition flex items-center gap-2 shadow-lg shadow-emerald-500/30"
+                  >
+                    <Play size={16} />
+                    <span>Povolit skenování další knihy</span>
+                  </button>
+                ) : (
+                  <div className="px-3 py-1.5 bg-blue-500/20 text-blue-300 border border-blue-500/30 rounded-xl text-xs flex items-center gap-1.5 font-medium">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span>Aktivní skenování...</span>
+                  </div>
+                )}
+
+                <button
+                  onClick={stopCamera}
+                  className="px-4 py-2.5 bg-red-600 hover:bg-red-500 active:bg-red-700 text-white font-bold rounded-xl text-xs transition flex items-center gap-2 shadow-lg shadow-red-600/30"
+                >
+                  <CameraOff size={16} />
+                  <span>Vypnout Kameru</span>
+                </button>
+              </>
             )}
           </div>
 
           {lastScannedResult && !isSimulatingCamera && (
-            <div className="mt-3 text-xs bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 p-2 rounded-lg z-10 font-mono">
-              {lastScannedResult}
+            <div className="mt-3 text-xs bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 p-2.5 rounded-lg z-10 font-mono flex flex-col items-center gap-1.5 w-full max-w-sm">
+              <div className="flex items-center gap-1.5 font-bold">
+                <CheckCircle size={14} className="text-emerald-400 shrink-0" />
+                <span>{lastScannedResult}</span>
+              </div>
+              {isScanPaused && isCameraActive && (
+                <div className="flex items-center gap-1 text-[11px] text-amber-300 font-sans mt-0.5">
+                  <PauseCircle size={13} className="shrink-0" />
+                  <span>Skenování pozastaveno</span>
+                </div>
+              )}
             </div>
           )}
         </div>
