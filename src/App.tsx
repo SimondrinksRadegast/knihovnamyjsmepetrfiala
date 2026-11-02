@@ -1,6 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { Book, UserRole, ViewTab, User } from './types';
-import { INITIAL_BOOKS } from './mockData';
 import { Header } from './components/Header';
 import { BookCatalog } from './components/BookCatalog';
 import { BookScanner } from './components/BookScanner';
@@ -8,20 +7,41 @@ import { AdminPanel } from './components/AdminPanel';
 import { QRCodeGenerator } from './components/QRCodeGenerator';
 import { AuthModal } from './components/AuthModal';
 import { fetchNewestCoverFromKnihovny } from './services/knihovnyCover';
+import {
+  loadBooks,
+  saveBooks,
+  resetBooks,
+  loadStoredUser,
+  saveStoredUser,
+  loadStoredRole,
+  saveStoredRole,
+} from './services/storage';
+
+const CURRENT_YEAR = new Date().getFullYear();
 
 export function App() {
-  const [books, setBooks] = useState<Book[]>(INITIAL_BOOKS);
+  const [books, setBooks] = useState<Book[]>(loadBooks);
   const [activeTab, setActiveTab] = useState<ViewTab>('katalog');
-  const [userRole, setUserRole] = useState<UserRole>('vedouci'); // Default to leader to showcase full capabilities
-  const [currentUser, setCurrentUser] = useState<User | null>({
-    id: 'u-admin',
-    name: 'Jan Vedoucí',
-    email: 'vedouci@knihovna.cz',
-    role: 'vedouci',
-  });
+  const [userRole, setUserRole] = useState<UserRole>(loadStoredRole);
+  const [currentUser, setCurrentUser] = useState<User | null>(loadStoredUser);
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedBookForQR, setSelectedBookForQR] = useState<Book | null>(null);
+
+  // Persist books on every change
+  useEffect(() => {
+    saveBooks(books);
+  }, [books]);
+
+  // Persist current user on change
+  useEffect(() => {
+    saveStoredUser(currentUser);
+  }, [currentUser]);
+
+  // Persist user role on change
+  useEffect(() => {
+    saveStoredRole(userRole);
+  }, [userRole]);
 
   // Sync current user role if changed from quick toggle bar
   const handleSetRole = (role: UserRole) => {
@@ -42,6 +62,13 @@ export function App() {
   const handleLogout = () => {
     setCurrentUser(null);
     setUserRole('verejnost');
+  };
+
+  const handleResetData = () => {
+    if (window.confirm('Opravdu chcete obnovit výchozí vzorová data knihovny? Vaše změny budou přepsány.')) {
+      const defaultBooks = resetBooks();
+      setBooks(defaultBooks);
+    }
   };
 
   // Database Mutations
@@ -133,6 +160,7 @@ export function App() {
             onEditBook={handleEditBook}
             onDeleteBook={handleDeleteBook}
             onSelectBookForQR={handleSelectBookForQR}
+            onResetData={handleResetData}
           />
         )}
 
@@ -149,10 +177,10 @@ export function App() {
       <footer className="bg-slate-900 text-slate-400 text-xs py-6 border-t border-slate-800 print:hidden">
         <div className="max-w-7xl mx-auto px-4 text-center space-y-2">
           <p className="font-semibold text-slate-300">
-            Knihovní Kataloční & Rozpoznávací Systém © {new Date().getFullYear()}
+            Knihovní Kataloční & Rozpoznávací Systém © {CURRENT_YEAR}
           </p>
           <p className="text-slate-500">
-            Aplikace pro správu knih, OCR/rozpoznávání, generování QR štítků a evidenci zaměstnanců
+            Aplikace pro správu knih, OCR/rozpoznávání, generování QR štítků a evidenci zaměstnanců • Data se automaticky ukládají
           </p>
         </div>
       </footer>
