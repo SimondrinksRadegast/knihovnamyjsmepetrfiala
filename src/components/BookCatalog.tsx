@@ -316,11 +316,34 @@ export const BookCatalog: React.FC<BookCatalogProps> = ({
                     </div>
 
                     <div>
-                      <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">ISBN</label>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="block text-[10px] font-bold text-slate-600 uppercase">ISBN</label>
+                        <label className="text-[10px] text-amber-800 flex items-center gap-1 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(editFormData.hasNoIsbn || editFormData.isbn === 'Bez ISBN')}
+                            onChange={(e) => {
+                              const checked = e.target.checked;
+                              setEditFormData({
+                                ...editFormData,
+                                hasNoIsbn: checked,
+                                isbn: checked ? 'Bez ISBN' : '',
+                              });
+                            }}
+                            className="rounded h-3 w-3 text-amber-600"
+                          />
+                          <span>Bez ISBN</span>
+                        </label>
+                      </div>
                       <input
                         type="text"
                         value={editFormData.isbn}
-                        onChange={(e) => setEditFormData({ ...editFormData, isbn: e.target.value })}
+                        onChange={(e) => setEditFormData({
+                          ...editFormData,
+                          isbn: e.target.value,
+                          hasNoIsbn: e.target.value === 'Bez ISBN',
+                        })}
+                        placeholder="978-80-... nebo Bez ISBN"
                         className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />
                     </div>
@@ -535,7 +558,18 @@ export const BookCatalog: React.FC<BookCatalogProps> = ({
                     <div className="grid grid-cols-2 gap-3 text-sm">
                       <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
                         <p className="text-xs text-slate-600 font-medium">ISBN Kód</p>
-                        <p className="font-mono font-semibold text-slate-800">{activeBook.isbn}</p>
+                        {activeBook.hasNoIsbn || !activeBook.isbn || activeBook.isbn.toLowerCase() === 'bez isbn' ? (
+                          <div className="mt-0.5">
+                            <span className="px-2 py-0.5 rounded text-xs font-bold bg-amber-100 text-amber-900 border border-amber-200 inline-block font-sans">
+                              Bez ISBN
+                            </span>
+                            {activeBook.noIsbnReason && (
+                              <p className="text-[11px] text-slate-500 font-sans mt-0.5">{activeBook.noIsbnReason}</p>
+                            )}
+                          </div>
+                        ) : (
+                          <p className="font-mono font-semibold text-slate-800">{activeBook.isbn}</p>
+                        )}
                       </div>
 
                       <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">

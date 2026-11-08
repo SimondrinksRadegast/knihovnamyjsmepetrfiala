@@ -68,7 +68,7 @@ interface BookScannerProps {
 
 export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookStatus, onAddBook }) => {
   const [scanInput, setScanInput] = useState('');
-  const [scanMode, setScanMode] = useState<'all' | 'isbn' | 'ocr-isbn' | 'code' | 'text' | 'cover' | 'manual-isbn'>('all');
+  const [scanMode, setScanMode] = useState<'all' | 'isbn' | 'ocr-isbn' | 'code' | 'text' | 'cover' | 'manual-isbn' | 'no-isbn'>('all');
   const [matchedBooks, setMatchedBooks] = useState<Book[]>([]);
   const [isSimulatingCamera, setIsSimulatingCamera] = useState(false);
   const [lastScannedResult, setLastScannedResult] = useState<string | null>(null);
@@ -107,6 +107,17 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
   // Manual ISBN input state
   const [manualIsbnInput, setManualIsbnInput] = useState('');
   const [manualIsbnReason, setManualIsbnReason] = useState<string>('skvrna');
+
+  // Manual entry of books completely without ISBN (historic, samizdat, pamphlets)
+  const [noIsbnTitle, setNoIsbnTitle] = useState('');
+  const [noIsbnAuthor, setNoIsbnAuthor] = useState('');
+  const [noIsbnYear, setNoIsbnYear] = useState<number>(1930);
+  const [noIsbnCategory, setNoIsbnCategory] = useState('Historie & Vzácné tisky');
+  const [noIsbnLocation, setNoIsbnLocation] = useState('Regál H1 - Historické tisky');
+  const [noIsbnPublisher, setNoIsbnPublisher] = useState('');
+  const [noIsbnReason, setNoIsbnReason] = useState('Vydáno před zavedením ISBN (do r. 1970/1989)');
+  const [noIsbnDescription, setNoIsbnDescription] = useState('');
+  const [noIsbnPhysicalDetails, setNoIsbnPhysicalDetails] = useState('');
 
   const searchKnihovnyCz = async (rawIsbn: string) => {
     const cleanIsbn = rawIsbn.trim().replace(/[- ]/g, '');
@@ -161,6 +172,50 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
     }
   };
 
+  const handleAddNoIsbnBookToDb = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!noIsbnTitle.trim() || !noIsbnAuthor.trim()) {
+      alert('Vyplňte prosím Název titulu a Autora.');
+      return;
+    }
+    if (!onAddBook) return;
+
+    const authorInitials = noIsbnAuthor.trim().split(' ').pop()?.slice(0, 3).toUpperCase() || 'AUT';
+    const existingCount = books.length + 1;
+    const generatedCode = `LIB-${authorInitials}-${String(existingCount).padStart(3, '0')}`;
+
+    const newBookData = {
+      title: noIsbnTitle.trim(),
+      author: noIsbnAuthor.trim(),
+      isbn: 'Bez ISBN',
+      hasNoIsbn: true,
+      noIsbnReason,
+      code: generatedCode,
+      category: noIsbnCategory.trim() || 'Historické tisky',
+      year: Number(noIsbnYear) || 1900,
+      publisher: noIsbnPublisher.trim() || 'Dobový tisk',
+      description: noIsbnDescription.trim() || `Kniha "${noIsbnTitle}" bez přiděleného ISBN (${noIsbnReason}).`,
+      status: 'Dostupná' as const,
+      location: noIsbnLocation.trim() || 'Regál H1 - Historické tisky',
+      physicalDetails: noIsbnPhysicalDetails.trim() || undefined,
+      notes: `Publikace nemá ISBN (${noIsbnReason}). Zaevidováno ručním zápisem.`,
+    };
+
+    onAddBook(newBookData);
+    setActionSuccessMessage(`Kniha "${noIsbnTitle}" byla úspěšně zaevidována bez ISBN s interním kódem ${generatedCode}!`);
+    setLastScannedResult(`Zapsána kniha bez ISBN: ${noIsbnTitle} (${generatedCode})`);
+
+    // Reset fields and set search to the newly added title
+    setScanInput(noIsbnTitle);
+    handleSearch(noIsbnTitle, 'all');
+    setNoIsbnTitle('');
+    setNoIsbnAuthor('');
+    setNoIsbnPublisher('');
+    setNoIsbnDescription('');
+    setNoIsbnPhysicalDetails('');
+    setTimeout(() => setActionSuccessMessage(null), 6000);
+  };
+
   const handleAddKnihovnyBookToDb = () => {
     const targetBook = editableKnihovnyBook || knihovnyResult;
     if (!targetBook || !onAddBook) return;
@@ -192,7 +247,7 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
     setTimeout(() => setActionSuccessMessage(null), 5000);
   };
 
-  const handleSearch = (query: string, modeOverride?: 'all' | 'isbn' | 'ocr-isbn' | 'code' | 'text' | 'cover' | 'manual-isbn') => {
+  const handleSearch = (query: string, modeOverride?: 'all' | 'isbn' | 'ocr-isbn' | 'code' | 'text' | 'cover' | 'manual-isbn' | 'no-isbn') => {
     const activeMode = modeOverride || scanMode;
     setScanInput(query);
     const cleanQuery = query.trim().toLowerCase();
@@ -689,6 +744,19 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
               </button>
               <button
                 onClick={() => {
+                  setScanMode('no-isbn');
+                  handleSearch(scanInput, 'text');
+                }}
+                className={`px-2.5 py-1 rounded-md font-medium transition flex items-center gap-1 ${
+                  scanMode === 'no-isbn' ? 'bg-purple-700 text-white shadow-sm font-bold' : 'text-purple-900 bg-purple-50 hover:bg-purple-100 font-semibold'
+                }`}
+                title="Ruční zápis pro případ, že kniha vůbec nemá ISBN (starý tisk, samizdat, brožura)"
+              >
+                <BookOpen size={13} />
+                <span>Zápis knihy bez ISBN</span>
+              </button>
+              <button
+                onClick={() => {
                   setScanMode('manual-isbn');
                   handleSearch(scanInput, 'manual-isbn');
                 }}
@@ -767,7 +835,9 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
               value={scanInput}
               onChange={(e) => handleSearch(e.target.value, scanMode)}
               placeholder={
-                scanMode === 'manual-isbn'
+                scanMode === 'no-isbn'
+                  ? 'Vyhledat existující knihu bez ISBN podle názvu či autora...'
+                  : scanMode === 'manual-isbn'
                   ? 'Zadejte číslo ISBN ručně (např. 978-80-7390-348-1)...'
                   : scanMode === 'ocr-isbn'
                   ? 'Rozpoznané číslo ISBN bez čárového kódu (např. 978-80-7390-348-1)...'
@@ -801,6 +871,171 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
               </button>
             )}
           </div>
+
+          {/* Dedicated form for books that have NO ISBN AT ALL (historic prints, samizdat, etc.) */}
+          {scanMode === 'no-isbn' && (
+            <div className="bg-purple-50/80 border border-purple-200 rounded-xl p-4 space-y-4 animate-in fade-in">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-purple-200/80 pb-2.5">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 bg-purple-700 text-white rounded-lg shadow-xs">
+                    <BookOpen size={16} />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-purple-950 uppercase tracking-wide">
+                      Ruční zápis knihy bez ISBN
+                    </h4>
+                    <p className="text-[11px] text-purple-800">
+                      Pro knihy, které <strong>žádné ISBN nemají</strong> – staré tisky před rokem 1970/1989, samizdaty, obecní kroniky, bibliofilie či interní skripta.
+                    </p>
+                  </div>
+                </div>
+
+                <span className="px-2.5 py-1 bg-purple-100 text-purple-900 border border-purple-300 rounded-lg text-xs font-bold font-mono">
+                  Označení: Bez ISBN
+                </span>
+              </div>
+
+              {/* Informative banner about ISBN introduction history */}
+              <div className="bg-white/90 border border-purple-200 p-3 rounded-xl text-[11px] text-purple-950 flex items-start gap-2.5">
+                <Info size={16} className="text-purple-700 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <p className="font-bold">Proč některé knihy nemají ISBN?</p>
+                  <p className="text-purple-900 leading-relaxed">
+                    Mezinárodní systém ISBN byl celosvětově zaveden až v roce <strong>1970</strong> a v Československu v roce <strong>1989</strong>. Všechny starší publikace, antikvární svazky, samizdatová vydání či soukromé tisky ISBN postrádají. Knihovní systém jim automaticky přidělí vlastní interní kód a vygeneruje unikátní QR štítek pro evidenci a půjčování.
+                  </p>
+                </div>
+              </div>
+
+              {/* Fast registration form */}
+              <form onSubmit={handleAddNoIsbnBookToDb} className="bg-white p-4 rounded-xl border border-purple-200 space-y-3">
+                <h5 className="font-bold text-xs text-slate-800 flex items-center gap-1.5 border-b border-slate-100 pb-2">
+                  <Plus size={14} className="text-purple-600" /> Rychlé zaevidování knihy bez ISBN do fondu:
+                </h5>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 text-xs">
+                  <div className="sm:col-span-2">
+                    <label className="block text-[10px] font-bold text-slate-700 uppercase mb-1">Název díla *</label>
+                    <input
+                      type="text"
+                      required
+                      value={noIsbnTitle}
+                      onChange={(e) => setNoIsbnTitle(e.target.value)}
+                      placeholder="Např. Staré pověsti české (původní tisk)"
+                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-700 uppercase mb-1">Autor *</label>
+                    <input
+                      type="text"
+                      required
+                      value={noIsbnAuthor}
+                      onChange={(e) => setNoIsbnAuthor(e.target.value)}
+                      placeholder="Alois Jirásek"
+                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-700 uppercase mb-1">Rok vydání</label>
+                    <input
+                      type="number"
+                      value={noIsbnYear}
+                      onChange={(e) => setNoIsbnYear(Number(e.target.value))}
+                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-700 uppercase mb-1">Důvod absence ISBN</label>
+                    <select
+                      value={noIsbnReason}
+                      onChange={(e) => setNoIsbnReason(e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs bg-slate-50 focus:outline-none focus:ring-2 focus:ring-purple-500 font-medium"
+                    >
+                      <option value="Vydáno před zavedením ISBN (do r. 1970/1989)">Vydáno před r. 1970/1989 (historický tisk)</option>
+                      <option value="Samizdat / ilegální tisk">Samizdat / ilegální tisk</option>
+                      <option value="Bibliofilie / číslovaný vzácný tisk">Bibliofilie / číslovaný vzácný tisk</option>
+                      <option value="Skripta / interní metodika">Skripta / interní metodika</option>
+                      <option value="Kronika / rukopisné zápisy">Kronika / rukopisné zápisy</option>
+                      <option value="Jiné / nezjištěno">Jiné / nezjištěno</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-700 uppercase mb-1">Kategorie</label>
+                    <input
+                      type="text"
+                      value={noIsbnCategory}
+                      onChange={(e) => setNoIsbnCategory(e.target.value)}
+                      placeholder="Historie & Vzácné tisky"
+                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-700 uppercase mb-1">Původní nakladatel / tiskárna</label>
+                    <input
+                      type="text"
+                      value={noIsbnPublisher}
+                      onChange={(e) => setNoIsbnPublisher(e.target.value)}
+                      placeholder="J. Otto v Praze"
+                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-700 uppercase mb-1">Umístění v knihovně</label>
+                    <input
+                      type="text"
+                      value={noIsbnLocation}
+                      onChange={(e) => setNoIsbnLocation(e.target.value)}
+                      placeholder="Regál H1 - Historické tisky"
+                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-700 uppercase mb-1">Fyzický popis / Vazba</label>
+                    <input
+                      type="text"
+                      value={noIsbnPhysicalDetails}
+                      onChange={(e) => setNoIsbnPhysicalDetails(e.target.value)}
+                      placeholder="Původní plátěná vazba se zlacením, 24 cm"
+                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-700 uppercase mb-1">Popis / Poznámka k exempláři</label>
+                  <textarea
+                    rows={2}
+                    value={noIsbnDescription}
+                    onChange={(e) => setNoIsbnDescription(e.target.value)}
+                    placeholder="Historické poznámky, stav dochování, exlibris či původ svazku..."
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  />
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100">
+                  <div className="text-[11px] text-slate-500 flex items-center gap-1 font-mono">
+                    <QrCode size={13} className="text-purple-600" />
+                    <span>Systém vygeneruje unikátní QR kód a interní identifikátor</span>
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="px-5 py-2 bg-purple-700 hover:bg-purple-800 text-white font-bold text-xs rounded-xl transition flex items-center gap-1.5 shadow-sm"
+                  >
+                    <Plus size={15} />
+                    <span>Zaevidovat knihu bez ISBN</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
 
           {/* Manual ISBN Input Panel for stained / damaged books */}
           {scanMode === 'manual-isbn' && (() => {
@@ -1391,8 +1626,17 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
                 </p>
               </div>
 
-              {/* Direct fallback trigger for stained / damaged books */}
-              <div className="pt-2">
+                  {/* Direct fallback trigger for stained / damaged books & books without ISBN */}
+                  <div className="pt-2 flex flex-col gap-2 items-center">
+                    <button
+                      onClick={() => {
+                        setScanMode('no-isbn');
+                      }}
+                      className="text-xs bg-purple-950/80 hover:bg-purple-900 text-purple-200 hover:text-white px-3 py-1.5 rounded-lg border border-purple-700/60 transition flex items-center gap-1.5 mx-auto font-bold"
+                    >
+                      <BookOpen size={13} />
+                      <span>Kniha vůbec nemá ISBN? Zapsat ručně</span>
+                    </button>
                 <button
                   onClick={() => {
                     setScanMode('manual-isbn');
@@ -1818,7 +2062,13 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
                     <p className="text-xs text-slate-600 font-medium">{book.author} • {book.category}</p>
 
                     <div className="flex items-center gap-4 text-xs font-mono text-slate-600 mt-1">
-                      <span className="font-bold text-slate-800">ISBN: {book.isbn}</span>
+                      {book.hasNoIsbn || !book.isbn || book.isbn.toLowerCase() === 'bez isbn' ? (
+                        <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-purple-100 text-purple-900 border border-purple-200 font-sans">
+                          Bez ISBN {book.noIsbnReason ? `(${book.noIsbnReason})` : ''}
+                        </span>
+                      ) : (
+                        <span className="font-bold text-slate-800">ISBN: {book.isbn}</span>
+                      )}
                       <span>Kód: {book.code}</span>
                       <span className="font-sans text-blue-700 font-semibold">{book.location}</span>
                     </div>
