@@ -6,7 +6,9 @@ export interface Book {
   id: string;
   title: string;
   author: string;
-  isbn: string;
+  isbn: string; // Může obsahovat číslo ISBN nebo "Bez ISBN" pro tituly bez přiděleného ISBN
+  hasNoIsbn?: boolean; // Příznak, že kniha nemá přiděleno ISBN (např. staré tisky před r. 1970/1989, samizdaty, brožury)
+  noIsbnReason?: string; // Důvod absence ISBN (např. "Vydáno před zavedením ISBN", "Bibliofilie", "Samizdat")
   code: string; // Interní kód knihy
   category: string;
   year: number;

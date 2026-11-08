@@ -18,7 +18,10 @@ export const QRCodeGenerator: React.FC<QRCodeGeneratorProps> = ({
   const [libraryName, setLibraryName] = useState('Městská Knihovna');
   const [copied, setCopied] = useState(false);
 
-  const qrPayload = activeBook ? `LIB:${activeBook.code}:${activeBook.isbn}` : '';
+  const isNoIsbn = Boolean(
+    activeBook && (activeBook.hasNoIsbn || !activeBook.isbn || activeBook.isbn.toLowerCase() === 'bez isbn')
+  );
+  const qrPayload = activeBook ? `LIB:${activeBook.code}:${isNoIsbn ? 'BEZ-ISBN' : activeBook.isbn}` : '';
 
   const handlePrint = () => {
     window.print();
@@ -68,11 +71,14 @@ export const QRCodeGenerator: React.FC<QRCodeGeneratorProps> = ({
               }}
               className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
-              {books.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.title} — {b.code} ({b.isbn})
-                </option>
-              ))}
+              {books.map((b) => {
+                const bNoIsbn = b.hasNoIsbn || !b.isbn || b.isbn.toLowerCase() === 'bez isbn';
+                return (
+                  <option key={b.id} value={b.id}>
+                    {b.title} — {b.code} ({bNoIsbn ? 'Bez ISBN' : b.isbn})
+                  </option>
+                );
+              })}
             </select>
           </div>
 
@@ -120,7 +126,9 @@ export const QRCodeGenerator: React.FC<QRCodeGeneratorProps> = ({
                 <div className="font-bold text-slate-900 bg-slate-100 py-1 px-2 rounded border border-slate-200">
                   {activeBook.code}
                 </div>
-                <div className="text-[11px] text-slate-600">ISBN: {activeBook.isbn}</div>
+                <div className="text-[11px] text-slate-600 font-semibold">
+                  {isNoIsbn ? 'Publikace bez ISBN' : `ISBN: ${activeBook.isbn}`}
+                </div>
                 <div className="text-[11px] font-sans text-blue-700 font-semibold pt-1">
                   {activeBook.location}
                 </div>

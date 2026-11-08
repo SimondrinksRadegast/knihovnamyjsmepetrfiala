@@ -253,5 +253,28 @@ export const INITIAL_BOOKS: Book[] = [
     coverImage: 'https://www.databazeknih.cz/img/books/56_/561504/twisted-love-laska-na-ostri-noze.jpg?v=1742584807',
     addedDate: '2024-04-09',
     borrowedBy: 'Michaela Svobodová'
+  },
+  {
+    id: 'b-16',
+    title: 'Kronika města a farnosti (Historický památník)',
+    author: 'Václav Beneš Třebízský',
+    isbn: 'Bez ISBN',
+    hasNoIsbn: true,
+    noIsbnReason: 'Vydáno před zavedením ISBN (1888)',
+    code: 'LIB-TRE-016',
+    category: 'Historie',
+    year: 1888,
+    publisher: 'Knihtiskárna F. Šimáčka v Praze',
+    description: 'Vzácný historický tisk zachycující regionální kronikářské zápisy a místopisné paměti z konce 19. století bez přiděleného ISBN.',
+    status: 'Dostupná',
+    location: 'Vzácné tisky - Trezor T1',
+    jacketAuthorInfo: 'Václav Beneš Třebízský (1849–1884) byl český kněz, spisovatel historických povídek a kronikář.',
+    coverKeywords: ['kronika', 'trebizsky', 'historie', 'pamatnik', 'tisk'],
+    pageCount: 184,
+    language: 'Čeština',
+    edition: 'Původní dobový tisk',
+    physicalDetails: 'Dobová polokožená vazba se zlacením na hřbetu, ruční papír, 22 cm',
+    notes: 'Kniha vydána před zavedením systému ISBN (zavedeno v ČSFR v roce 1989). Zaevidováno ručním zápisem.',
+    addedDate: '2024-04-10',
   }
 ];

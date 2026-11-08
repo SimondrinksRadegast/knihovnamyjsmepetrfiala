@@ -33,6 +33,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [title, setTitle] = useState('');
   const [author, setAuthor] = useState('');
   const [isbn, setIsbn] = useState('');
+  const [hasNoIsbn, setHasNoIsbn] = useState(false);
+  const [noIsbnReason, setNoIsbnReason] = useState('Vydáno před zavedením ISBN');
   const [code, setCode] = useState('');
   const [category, setCategory] = useState('Česká klasika');
   const [year, setYear] = useState(CURRENT_YEAR);
@@ -60,6 +62,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setTitle('');
     setAuthor('');
     setIsbn('');
+    setHasNoIsbn(false);
+    setNoIsbnReason('Vydáno před zavedením ISBN');
     setCode('');
     setCategory('Česká klasika');
     setYear(CURRENT_YEAR);
@@ -87,7 +91,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setEditingBookId(book.id);
     setTitle(book.title);
     setAuthor(book.author);
-    setIsbn(book.isbn);
+    const bookHasNoIsbn = Boolean(book.hasNoIsbn || !book.isbn || book.isbn.toLowerCase() === 'bez isbn');
+    setHasNoIsbn(bookHasNoIsbn);
+    setNoIsbnReason(book.noIsbnReason || 'Vydáno před zavedením ISBN');
+    setIsbn(bookHasNoIsbn ? 'Bez ISBN' : book.isbn);
     setCode(book.code);
     setCategory(book.category);
     setYear(book.year);
@@ -180,8 +187,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title || !author || !isbn || !code) {
-      alert('Vyplňte prosím Název, Autora, ISBN a Kód knihy.');
+    const finalIsbn = hasNoIsbn ? 'Bez ISBN' : isbn.trim();
+    if (!title || !author || !code) {
+      alert('Vyplňte prosím Název, Autora a Kód knihy.');
+      return;
+    }
+    if (!hasNoIsbn && !finalIsbn) {
+      alert('Zadejte prosím ISBN kód nebo zaškrtněte volbu, že kniha ISBN nemá.');
       return;
     }
 
@@ -232,7 +244,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           ...existing,
           title,
           author,
-          isbn,
+          isbn: finalIsbn,
+          hasNoIsbn,
+          noIsbnReason: hasNoIsbn ? noIsbnReason : undefined,
           code,
           category: finalCategory,
           year: finalYear,
@@ -255,7 +269,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       onAddBook({
         title,
         author,
-        isbn,
+        isbn: finalIsbn,
+        hasNoIsbn,
+        noIsbnReason: hasNoIsbn ? noIsbnReason : undefined,
         code,
         category: finalCategory,
         year: finalYear,
@@ -478,16 +494,66 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   />
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">ISBN kód *</label>
-                  <input
-                    type="text"
-                    required
-                    value={isbn}
-                    onChange={(e) => setIsbn(e.target.value)}
-                    placeholder="978-80-7390-348-1"
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-semibold text-slate-700 uppercase">
+                      ISBN kód {!hasNoIsbn && '*'}
+                    </label>
+                    <label className="flex items-center gap-1.5 text-xs text-amber-900 font-medium cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={hasNoIsbn}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          setHasNoIsbn(checked);
+                          if (checked) {
+                            setIsbn('Bez ISBN');
+                          } else if (isbn === 'Bez ISBN') {
+                            setIsbn('');
+                          }
+                        }}
+                        className="rounded border-slate-300 text-amber-600 focus:ring-amber-500 h-3.5 w-3.5"
+                      />
+                      <span>Kniha nemá ISBN</span>
+                    </label>
+                  </div>
+
+                  {hasNoIsbn ? (
+                    <div className="space-y-1.5 bg-amber-50/70 p-2.5 rounded-lg border border-amber-200">
+                      <div className="flex items-center gap-2">
+                        <span className="px-2 py-0.5 bg-amber-200 text-amber-950 rounded text-xs font-bold font-mono">
+                          Bez ISBN
+                        </span>
+                        <span className="text-[11px] text-amber-800">
+                          (Pro publikace bez přiděleného ISBN)
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-amber-950 flex items-center gap-1">
+                        <span className="font-semibold">Důvod:</span>
+                        <select
+                          value={noIsbnReason}
+                          onChange={(e) => setNoIsbnReason(e.target.value)}
+                          className="bg-white border border-amber-300 rounded px-2 py-0.5 text-xs focus:outline-none"
+                        >
+                          <option value="Vydáno před zavedením ISBN">Vydáno před zavedením ISBN (do r. 1970/1989)</option>
+                          <option value="Samizdat / soukromý tisk">Samizdat / soukromý tisk</option>
+                          <option value="Bibliofilie / vzácný tisk">Bibliofilie / vzácný tisk</option>
+                          <option value="Skripta / interní tiskovina">Skripta / interní tiskovina</option>
+                          <option value="Regionální / obecní kronika">Regionální / obecní kronika</option>
+                          <option value="Jiné / nezjištěno">Jiné / nezjištěno</option>
+                        </select>
+                      </div>
+                    </div>
+                  ) : (
+                    <input
+                      type="text"
+                      required
+                      value={isbn}
+                      onChange={(e) => setIsbn(e.target.value)}
+                      placeholder="978-80-7390-348-1"
+                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  )}
                 </div>
 
                 <div>
@@ -718,7 +784,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
                   <td className="py-3 px-4 whitespace-nowrap">
                     <div className="font-mono font-bold text-slate-800">{book.code}</div>
-                    <div className="text-[10px] text-slate-600 font-mono">{book.isbn}</div>
+                    {book.hasNoIsbn || !book.isbn || book.isbn.toLowerCase() === 'bez isbn' ? (
+                      <span className="inline-block mt-0.5 px-1.5 py-0.2 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                        Bez ISBN
+                      </span>
+                    ) : (
+                      <div className="text-[10px] text-slate-600 font-mono">{book.isbn}</div>
+                    )}
                   </td>
 
                   <td className="py-3 px-4">

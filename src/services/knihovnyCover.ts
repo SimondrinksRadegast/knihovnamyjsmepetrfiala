@@ -51,7 +51,9 @@ export function generateKnihovnyCoverSvg(params: {
   const title = (params.title || 'Knižní titul').trim();
   const author = (params.author || 'Neznámý autor').trim();
   const year = params.year ? String(params.year) : 'Knihovny.cz';
-  const isbn = params.isbn ? `ISBN: ${params.isbn}` : '';
+  const cleanIsbn = params.isbn ? params.isbn.trim() : '';
+  const isNoIsbn = !cleanIsbn || cleanIsbn.toLowerCase() === 'bez isbn';
+  const isbn = isNoIsbn ? 'BEZ ISBN' : `ISBN: ${cleanIsbn}`;
 
   // Deterministic palette based on title
   const palettes = [
