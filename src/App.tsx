@@ -140,6 +140,8 @@ export function App() {
             searchQuery={searchQuery}
             userRole={userRole}
             onEditBook={handleEditBook}
+            onAddBook={handleAddBook}
+            onDeleteBook={handleDeleteBook}
             onSelectBookForQR={handleSelectBookForQR}
             onQuickToggleStatus={handleUpdateBookStatus}
           />
