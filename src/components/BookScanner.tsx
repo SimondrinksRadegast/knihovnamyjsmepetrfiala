@@ -1,9 +1,36 @@
 import React, { useState, useEffect, useRef } from 'react';
 import type { Book } from '../types';
-import { ScanLine, Search, QrCode, BookCheck, CheckCircle, RefreshCw, Sparkles, Image as ImageIcon, BookOpen, Upload, UserCheck, FileText, Camera, CameraOff, AlertCircle, Plus, Play, PauseCircle } from 'lucide-react';
+import {
+  ScanLine,
+  Search,
+  QrCode,
+  BookCheck,
+  CheckCircle,
+  RefreshCw,
+  Sparkles,
+  Image as ImageIcon,
+  BookOpen,
+  Upload,
+  UserCheck,
+  FileText,
+  Camera,
+  CameraOff,
+  AlertCircle,
+  Plus,
+  Play,
+  PauseCircle,
+  Hash,
+  ScanText,
+  Check,
+} from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { fetchBookDetailsFromKnihovny, getReliableCoverUrl } from '../services/knihovnyCover';
+import {
+  recognizeIsbnFromImage,
+  extractIsbnFromText,
+  type IsbnRecognitionResult,
+} from '../services/isbnOcr';
 
 export interface KnihovnyBookResult {
   title: string;
@@ -35,7 +62,7 @@ interface BookScannerProps {
 
 export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookStatus, onAddBook }) => {
   const [scanInput, setScanInput] = useState('');
-  const [scanMode, setScanMode] = useState<'all' | 'isbn' | 'code' | 'text' | 'cover'>('all');
+  const [scanMode, setScanMode] = useState<'all' | 'isbn' | 'ocr-isbn' | 'code' | 'text' | 'cover'>('all');
   const [matchedBooks, setMatchedBooks] = useState<Book[]>([]);
   const [isSimulatingCamera, setIsSimulatingCamera] = useState(false);
   const [lastScannedResult, setLastScannedResult] = useState<string | null>(null);
@@ -48,6 +75,14 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
   const [isScanPaused, setIsScanPaused] = useState(false);
   const isScanPausedRef = useRef(false);
   const html5QrcodeRef = useRef<Html5Qrcode | null>(null);
+
+  // OCR printed ISBN state (reading written numbers without barcodes)
+  const [isOcrProcessing, setIsOcrProcessing] = useState(false);
+  const [ocrTextResult, setOcrTextResult] = useState<IsbnRecognitionResult | null>(null);
+  const [ocrPreviewImage, setOcrPreviewImage] = useState<string | null>(null);
+  const [rawPastedOcrText, setRawPastedOcrText] = useState('');
+  const [cameraScanTarget, setCameraScanTarget] = useState<'barcode' | 'ocr-text'>('barcode');
+  const ocrIntervalRef = useRef<number | null>(null);
 
   // Cover image / Jacket OCR state
   const [selectedCoverImage, setSelectedCoverImage] = useState<string | null>(null);
@@ -147,7 +182,7 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
     setTimeout(() => setActionSuccessMessage(null), 5000);
   };
 
-  const handleSearch = (query: string, modeOverride?: 'all' | 'isbn' | 'code' | 'text' | 'cover') => {
+  const handleSearch = (query: string, modeOverride?: 'all' | 'isbn' | 'ocr-isbn' | 'code' | 'text' | 'cover') => {
     const activeMode = modeOverride || scanMode;
     setScanInput(query);
     const cleanQuery = query.trim().toLowerCase();
@@ -161,7 +196,7 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
     }
 
     const digitsOnly = query.replace(/[- ]/g, '');
-    if (activeMode === 'isbn' || /^\d{10}(\d{3})?$/.test(digitsOnly)) {
+    if (activeMode === 'isbn' || activeMode === 'ocr-isbn' || /^\d{10}(\d{3})?$/.test(digitsOnly)) {
       searchKnihovnyCz(query);
     } else {
       setKnihovnyResult(null);
@@ -171,7 +206,7 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
     const confMap: Record<string, number> = {};
 
     const results = books.filter((book) => {
-      if (activeMode === 'isbn') {
+      if (activeMode === 'isbn' || activeMode === 'ocr-isbn') {
         return book.isbn.toLowerCase().replace(/[- ]/g, '').includes(cleanQuery.replace(/[- ]/g, ''));
       }
       if (activeMode === 'code') {
@@ -260,6 +295,99 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
     }, 1500);
   };
 
+  /**
+   * Simulates or triggers text-based ISBN OCR recognition from printed samples
+   */
+  const handleSimulateOcrTextScan = (sampleText: string, description: string) => {
+    setIsOcrProcessing(true);
+    setScanMode('ocr-isbn');
+    setRawPastedOcrText(sampleText);
+
+    setTimeout(() => {
+      const result = extractIsbnFromText(sampleText);
+      setIsOcrProcessing(false);
+      setOcrTextResult(result);
+
+      if (result.detectedIsbn) {
+        const found = result.formattedIsbn || result.detectedIsbn;
+        handleSearch(found, 'ocr-isbn');
+        setLastScannedResult(`OCR přečteno tištěné číslo: ${found} (${description})`);
+      }
+    }, 700);
+  };
+
+  /**
+   * Processes an image file (uploaded photo of copyright page/tiráž or back cover) via OCR
+   */
+  const handleProcessOcrImageFile = async (file: File) => {
+    setIsOcrProcessing(true);
+    setScanMode('ocr-isbn');
+    const previewUrl = URL.createObjectURL(file);
+    setOcrPreviewImage(previewUrl);
+
+    try {
+      const result = await recognizeIsbnFromImage(previewUrl);
+      setOcrTextResult(result);
+      if (result.detectedIsbn) {
+        const found = result.formattedIsbn || result.detectedIsbn;
+        handleSearch(found, 'ocr-isbn');
+        setLastScannedResult(`OCR rozpoznalo tištěné číslo z fotky: ${found}`);
+      } else {
+        // If whole image didn't yield clean ISBN, extract from whatever text was found
+        const fallback = extractIsbnFromText(result.rawText);
+        setOcrTextResult(fallback);
+        if (fallback.detectedIsbn) {
+          handleSearch(fallback.formattedIsbn || fallback.detectedIsbn, 'ocr-isbn');
+        }
+      }
+    } catch (err) {
+      console.warn('OCR error on image file:', err);
+    } finally {
+      setIsOcrProcessing(false);
+    }
+  };
+
+  /**
+   * Captures a single video frame from active camera and runs OCR text recognition on it
+   */
+  const handleCaptureFrameForOcr = async () => {
+    const videoElement = document.querySelector('#qr-reader video') as HTMLVideoElement | null;
+    if (!videoElement) {
+      alert('Kamera není aktivní. Nejprve spusťte kameru níže.');
+      return;
+    }
+
+    setIsOcrProcessing(true);
+    setScanMode('ocr-isbn');
+
+    try {
+      // Create cropped region in center where ISBN text is aimed
+      const vw = videoElement.videoWidth || 640;
+      const vh = videoElement.videoHeight || 480;
+      const cropRect = {
+        x: Math.round(vw * 0.1),
+        y: Math.round(vh * 0.35),
+        width: Math.round(vw * 0.8),
+        height: Math.round(vh * 0.3),
+      };
+
+      const result = await recognizeIsbnFromImage(videoElement, cropRect);
+      setOcrTextResult(result);
+
+      if (result.detectedIsbn) {
+        const found = result.formattedIsbn || result.detectedIsbn;
+        handleSearch(found, 'ocr-isbn');
+        setLastScannedResult(`OCR kamerou přečteno tištěné ISBN: ${found}`);
+        setIsScanPaused(true);
+        isScanPausedRef.current = true;
+      }
+    } catch (err) {
+      console.warn('Capture frame OCR error:', err);
+    } finally {
+      setIsOcrProcessing(false);
+    }
+  };
+
   const handleQuickReturn = (book: Book) => {
     const nextStatus: Book['status'] = book.status === 'Vypůjčená' ? 'Dostupná' : 'Vypůjčená';
     onUpdateBookStatus(book.id, nextStatus);
@@ -332,6 +460,11 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
   };
 
   const stopCamera = async () => {
+    if (ocrIntervalRef.current) {
+      clearInterval(ocrIntervalRef.current);
+      ocrIntervalRef.current = null;
+    }
+
     isScanPausedRef.current = false;
     setIsScanPaused(false);
     if (html5QrcodeRef.current) {
@@ -483,6 +616,9 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
 
   useEffect(() => {
     return () => {
+      if (ocrIntervalRef.current) {
+        clearInterval(ocrIntervalRef.current);
+      }
       if (html5QrcodeRef.current && html5QrcodeRef.current.isScanning) {
         html5QrcodeRef.current.stop().catch(() => {});
       }
@@ -495,19 +631,19 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
       <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white p-6 rounded-2xl shadow-md border border-slate-800 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
         <div>
           <div className="flex items-center gap-2 text-indigo-400 text-xs font-bold uppercase tracking-wider mb-1">
-            <Sparkles size={16} /> Inteligentní Rozpoznávání & Katalogizace
+            <Sparkles size={16} /> Inteligentní Rozpoznávání, OCR & Katalogizace
           </div>
-          <h2 className="text-2xl font-extrabold">Rozpoznání Knihy, Obalu & QR Skener</h2>
+          <h2 className="text-2xl font-extrabold">Čtení ISBN Textu, Obálky & QR/Čárových Kódů</h2>
           <p className="text-sm text-slate-300 mt-1 max-w-xl">
-            Vyhledejte knihu podle QR kódu, ISBN, názvu, vizuální analýzy obalu knihy nebo informací o autorovi na přebalu (OCR medailonku autora).
+            Vyhledejte knihu podle <strong>napsaného tištěného čísla ISBN bez čárového kódu</strong> (z tiráže či zadní strany), QR štítku, čárového kódu nebo vizuální analýzy obalu knihy.
           </p>
         </div>
 
-        <div className="flex items-center gap-2 bg-slate-800/80 p-3 rounded-xl border border-slate-700">
-          <ScanLine size={32} className="text-blue-400 animate-pulse" />
+        <div className="flex items-center gap-3 bg-slate-800/80 p-3 rounded-xl border border-slate-700">
+          <ScanText size={32} className="text-cyan-400 animate-pulse" />
           <div className="text-xs">
-            <p className="font-bold text-slate-200">Kamera & QR Optika</p>
-            <p className="text-slate-400">Příprava skenování...</p>
+            <p className="font-bold text-slate-200">OCR Čtení Textu & Optika</p>
+            <p className="text-slate-400">Podpora ISBN bez čárového kódu</p>
           </div>
         </div>
       </div>
@@ -529,17 +665,30 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
             </h3>
 
             {/* Mode selection */}
-            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg text-xs">
+            <div className="flex flex-wrap items-center gap-1 bg-slate-100 p-1 rounded-lg text-xs">
               <button
                 onClick={() => {
                   setScanMode('all');
                   handleSearch(scanInput, 'all');
                 }}
                 className={`px-2.5 py-1 rounded-md font-medium transition ${
-                  scanMode === 'all' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                  scanMode === 'all' ? 'bg-white text-blue-700 shadow-sm font-bold' : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
                 Vše
+              </button>
+              <button
+                onClick={() => {
+                  setScanMode('ocr-isbn');
+                  handleSearch(scanInput, 'ocr-isbn');
+                }}
+                className={`px-2.5 py-1 rounded-md font-medium transition flex items-center gap-1 ${
+                  scanMode === 'ocr-isbn' ? 'bg-cyan-600 text-white shadow-sm font-bold' : 'text-cyan-800 hover:bg-cyan-50 font-medium'
+                }`}
+                title="Čtení ISBN bez čárového kódu (pouze napsané/tištěné číslo)"
+              >
+                <ScanText size={13} />
+                <span>ISBN z textu (OCR)</span>
               </button>
               <button
                 onClick={() => {
@@ -551,7 +700,7 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
                 }`}
               >
                 <ImageIcon size={13} />
-                <span>Obal & Přebal (OCR)</span>
+                <span>Obal & Přebal</span>
               </button>
               <button
                 onClick={() => {
@@ -559,7 +708,7 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
                   handleSearch(scanInput, 'isbn');
                 }}
                 className={`px-2.5 py-1 rounded-md font-medium transition ${
-                  scanMode === 'isbn' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                  scanMode === 'isbn' ? 'bg-white text-blue-700 shadow-sm font-bold' : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
                 ISBN
@@ -584,7 +733,7 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
                   scanMode === 'text' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                Text / Název
+                Název
               </button>
             </div>
           </div>
@@ -595,7 +744,9 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
               value={scanInput}
               onChange={(e) => handleSearch(e.target.value)}
               placeholder={
-                scanMode === 'cover'
+                scanMode === 'ocr-isbn'
+                  ? 'Rozpoznané číslo ISBN bez čárového kódu (např. 978-80-7390-348-1)...'
+                  : scanMode === 'cover'
                   ? 'Zadejte text z přebalu, jméno autora nebo vizuální prvky obalu...'
                   : scanMode === 'isbn'
                   ? 'Zadejte nebo naskenujte ISBN (např. 978-80-7390-348-1)...'
@@ -613,6 +764,9 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
                   setScanInput('');
                   setJacketOcrText('');
                   setSelectedCoverImage(null);
+                  setOcrTextResult(null);
+                  setOcrPreviewImage(null);
+                  setRawPastedOcrText('');
                   setMatchedBooks([]);
                   setLastScannedResult(null);
                 }}
@@ -622,6 +776,177 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
               </button>
             )}
           </div>
+
+          {/* OCR Panel: Reading printed ISBN numbers without barcode */}
+          {scanMode === 'ocr-isbn' && (
+            <div className="bg-cyan-50/70 border border-cyan-200 rounded-xl p-4 space-y-4 animate-in fade-in">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-cyan-200/80 pb-2.5">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 bg-cyan-600 text-white rounded-lg shadow-xs">
+                    <ScanText size={16} />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-cyan-950 uppercase tracking-wide">
+                      Čtení tištěného ISBN bez čárového kódu (OCR)
+                    </h4>
+                    <p className="text-[11px] text-cyan-800">
+                      Načtení čísla ze stránek knihy, tiráže, vnitřní strany nebo přebalu bez nutnosti EAN kódu.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <label className="cursor-pointer text-xs font-bold text-cyan-950 hover:bg-cyan-100 bg-white px-3 py-1.5 rounded-lg border border-cyan-300 shadow-xs flex items-center gap-1.5 transition">
+                    <Upload size={14} className="text-cyan-700" />
+                    <span>Nahrát / vyfotit stránku s ISBN</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          handleProcessOcrImageFile(file);
+                        }
+                      }}
+                    />
+                  </label>
+                </div>
+              </div>
+
+              {/* Text input / Tirage paste area */}
+              <div className="space-y-2">
+                <label className="block text-[11px] font-bold text-cyan-900 uppercase">
+                  Vložte text z tiráže nebo zkopírujte odstavec s údaji o vydání:
+                </label>
+                <div className="flex gap-2">
+                  <textarea
+                    value={rawPastedOcrText}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setRawPastedOcrText(val);
+                      const res = extractIsbnFromText(val);
+                      setOcrTextResult(res);
+                      if (res.detectedIsbn) {
+                        handleSearch(res.formattedIsbn || res.detectedIsbn, 'ocr-isbn');
+                      }
+                    }}
+                    rows={2}
+                    placeholder="Sem vložte nebo naskenujte text (např. 'Vydalo nakladatelství Argo. 1. vydání. ISBN 978-80-7390-348-1')..."
+                    className="flex-1 text-xs p-2.5 bg-white border border-cyan-200 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:outline-none text-slate-800"
+                  />
+                </div>
+              </div>
+
+              {/* OCR Processing indicator */}
+              {isOcrProcessing && (
+                <div className="bg-white p-3 rounded-xl border border-cyan-300 flex items-center gap-3 text-cyan-900 text-xs animate-pulse">
+                  <RefreshCw size={18} className="animate-spin text-cyan-600" />
+                  <div>
+                    <p className="font-bold">Probíhá optické rozpoznávání znaků (OCR)...</p>
+                    <p className="text-[11px] text-cyan-700">Vyhledávání číselného formátu ISBN a ověřování kontrolního součtu.</p>
+                  </div>
+                </div>
+              )}
+
+              {/* OCR Detected Result Card */}
+              {ocrTextResult && (
+                <div className="bg-white p-3.5 rounded-xl border border-cyan-200 shadow-xs space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                      <Hash size={15} className="text-cyan-600" /> Nalezené číslo ISBN v textu:
+                    </span>
+                    {ocrTextResult.detectedIsbn ? (
+                      <span className="text-[11px] font-extrabold px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1">
+                        <Check size={13} /> {ocrTextResult.isbnType} {ocrTextResult.isValidChecksum ? '(Platný kontrolní součet)' : '(Nalezeno v textu)'}
+                      </span>
+                    ) : (
+                      <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800">
+                        V zadaném textu nebylo nalezeno žádné platné číslo ISBN
+                      </span>
+                    )}
+                  </div>
+
+                  {ocrTextResult.detectedIsbn ? (
+                    <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                      <div>
+                        <div className="font-mono font-extrabold text-base text-slate-900">
+                          {ocrTextResult.formattedIsbn || ocrTextResult.detectedIsbn}
+                        </div>
+                        <div className="text-[11px] text-slate-500 font-mono">
+                          Čisté číslice: {ocrTextResult.detectedIsbn}
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => handleSearch(ocrTextResult.formattedIsbn || ocrTextResult.detectedIsbn || '', 'ocr-isbn')}
+                        className="px-3.5 py-1.5 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-xs"
+                      >
+                        <Search size={14} />
+                        <span>Vyhledat v katalogu</span>
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {ocrPreviewImage && (
+                    <div className="flex items-center gap-3 pt-1">
+                      <img src={ocrPreviewImage} alt="Fotografie tiráže" className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
+                      <div className="text-[11px] text-slate-600">
+                        <p className="font-semibold text-slate-800">Nahraný snímek stránky</p>
+                        <p>Text z fotografie byl analyzován optickým čtením.</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Simulation buttons for OCR ISBN */}
+              <div>
+                <p className="text-[11px] font-bold text-cyan-950 uppercase mb-1.5 flex items-center gap-1">
+                  <ScanText size={12} className="text-cyan-700" /> Vyzkoušet ukázky tištěného ISBN bez čárového kódu:
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() =>
+                      handleSimulateOcrTextScan(
+                        'Vydalo nakladatelství Československý spisovatel v Praze. Náklad 50 000 výtisků. ISBN 978-80-7390-348-1. Vázáno.',
+                        'Babička (tiráž s ISBN-13)'
+                      )
+                    }
+                    disabled={isOcrProcessing}
+                    className="px-2.5 py-1.5 bg-white hover:bg-cyan-100 text-cyan-900 border border-cyan-300 rounded-lg text-xs font-mono transition flex items-center gap-1 shadow-2xs"
+                  >
+                    <span>📖 Babička: ISBN 978-80-7390-348-1</span>
+                  </button>
+                  <button
+                    onClick={() =>
+                      handleSimulateOcrTextScan(
+                        'Karel Čapek: R.U.R. Vydalo nakladatelství Aventinum. ISBN 978-80-207-1830-2. Původní divadelní tisk.',
+                        'R.U.R. (textové ISBN bez čárového kódu)'
+                      )
+                    }
+                    disabled={isOcrProcessing}
+                    className="px-2.5 py-1.5 bg-white hover:bg-cyan-100 text-cyan-900 border border-cyan-300 rounded-lg text-xs font-mono transition flex items-center gap-1 shadow-2xs"
+                  >
+                    <span>📖 R.U.R.: ISBN 978-80-207-1830-2</span>
+                  </button>
+                  <button
+                    onClick={() =>
+                      handleSimulateOcrTextScan(
+                        'František Tichý: Sto kreseb. ISBN 978-80-257-2624-2. Vydáno v Praze roku 2018.',
+                        'Sto kreseb (ISBN z tiráže)'
+                      )
+                    }
+                    disabled={isOcrProcessing}
+                    className="px-2.5 py-1.5 bg-white hover:bg-cyan-100 text-cyan-900 border border-cyan-300 rounded-lg text-xs font-mono transition flex items-center gap-1 shadow-2xs"
+                  >
+                    <span>📖 Sto kreseb: ISBN 978-80-257-2624-2</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Additional Cover / Jacket OCR Panel when 'cover' mode is selected */}
           {scanMode === 'cover' && (
@@ -740,17 +1065,54 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
         <div className="bg-slate-900 text-white rounded-2xl p-6 shadow-sm border border-slate-800 flex flex-col items-center justify-center text-center relative overflow-hidden min-h-[320px]">
           <div className="absolute inset-0 bg-[radial-gradient(#3b82f6_1px,transparent_1px)] [background-size:16px_16px] opacity-20"></div>
 
+          {/* Camera target mode toggle: Barcode vs OCR printed text */}
+          <div className="z-10 mb-3 bg-slate-800/90 p-1 rounded-xl border border-slate-700 flex items-center gap-1 text-xs">
+            <button
+              onClick={() => setCameraScanTarget('barcode')}
+              className={`px-3 py-1 rounded-lg font-medium transition flex items-center gap-1.5 ${
+                cameraScanTarget === 'barcode' ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-300 hover:text-white'
+              }`}
+            >
+              <QrCode size={13} />
+              <span>QR & Čárový kód</span>
+            </button>
+            <button
+              onClick={() => {
+                setCameraScanTarget('ocr-text');
+                setScanMode('ocr-isbn');
+              }}
+              className={`px-3 py-1 rounded-lg font-bold transition flex items-center gap-1.5 ${
+                cameraScanTarget === 'ocr-text' ? 'bg-cyan-600 text-white shadow-xs' : 'text-cyan-300 hover:text-white'
+              }`}
+            >
+              <ScanText size={13} />
+              <span>Čtení čísla (OCR)</span>
+            </button>
+          </div>
+
           {/* Live Camera Viewport */}
           <div className={`w-full overflow-hidden rounded-xl border border-slate-700 bg-black z-10 mb-4 relative ${isCameraActive ? 'block' : 'hidden'}`}>
             <div id="qr-reader" className="w-full"></div>
+
+            {/* Target reticle for OCR Text mode */}
+            {cameraScanTarget === 'ocr-text' && (
+              <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center">
+                <div className="w-4/5 h-20 border-2 border-dashed border-cyan-400 bg-cyan-500/10 rounded-xl flex items-center justify-center">
+                  <span className="text-[11px] font-mono font-bold text-cyan-200 bg-slate-950/80 px-2 py-0.5 rounded shadow">
+                    Zaměřte na řádek: "ISBN 978-..."
+                  </span>
+                </div>
+              </div>
+            )}
+
             {isScanPaused && (
               <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-xs flex flex-col items-center justify-center p-4 text-center z-20">
                 <div className="w-12 h-12 bg-emerald-500/20 text-emerald-400 rounded-full flex items-center justify-center mb-2 border border-emerald-500/40">
                   <CheckCircle size={28} />
                 </div>
-                <p className="font-bold text-white text-sm">Kniha úspěšně rozpoznána</p>
+                <p className="font-bold text-white text-sm">Úspěšně rozpoznáno</p>
                 <p className="text-xs text-slate-300 mt-1 mb-3 max-w-xs">
-                  Skenování je pozastaveno, aby se kód neopakoval. Pro načtení další knihy povolte pokračování.
+                  Skenování je pozastaveno. Pro načtení další knihy pokračujte tlačítkem níže.
                 </p>
                 <button
                   onClick={handleResumeScanning}
@@ -766,24 +1128,24 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
           {isCameraLoading ? (
             <div className="space-y-3 z-10 py-6">
               <RefreshCw size={40} className="text-blue-400 animate-spin mx-auto" />
-              <p className="text-sm font-bold text-blue-200">Spouštění kamery mobilu...</p>
-              <p className="text-xs text-slate-400">Žádost o přístup ke kameře zařázení</p>
+              <p className="text-sm font-bold text-blue-200">Spouštění optiky kamery...</p>
+              <p className="text-xs text-slate-400">Povolte v prohlížeči přístup ke kameře</p>
             </div>
           ) : isSimulatingCamera ? (
             <div className="space-y-3 z-10 py-6">
               <RefreshCw size={40} className="text-blue-400 animate-spin mx-auto" />
-              <p className="text-sm font-bold text-blue-200">Probíhá analýza QR kódu a rozpoznání...</p>
+              <p className="text-sm font-bold text-blue-200">Probíhá analýza a optické rozpoznání...</p>
               <p className="text-xs text-slate-400">Načítání údajů z databáze knihovny</p>
             </div>
           ) : !isCameraActive ? (
             <div className="space-y-3 z-10 py-2">
-              <div className="w-20 h-20 border-2 border-dashed border-blue-500/60 rounded-2xl flex items-center justify-center mx-auto bg-blue-500/10">
-                <ScanLine size={36} className="text-blue-400" />
+              <div className="w-20 h-20 border-2 border-dashed border-cyan-500/60 rounded-2xl flex items-center justify-center mx-auto bg-cyan-500/10">
+                <ScanLine size={36} className="text-cyan-400" />
               </div>
               <div>
-                <h4 className="font-bold text-sm text-slate-100">Kamera pro skenování QR & Čárových kódů</h4>
+                <h4 className="font-bold text-sm text-slate-100">Kamera pro čtení ISBN & Kódů</h4>
                 <p className="text-xs text-slate-400 mt-1 max-w-xs">
-                  Spusťte kameru mobilu pro okamžité skenování štítků knih.
+                  Přečte QR kód, čárový kód nebo přímo vytištěné číslo ISBN bez čárového kódu.
                 </p>
               </div>
             </div>
@@ -799,7 +1161,7 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
             </div>
           )}
 
-          {/* Action buttons to Start / Stop Camera */}
+          {/* Action buttons to Start / Stop Camera / OCR Snap */}
           <div className="z-10 mt-3 flex flex-wrap items-center justify-center gap-2">
             {!isCameraActive ? (
               <button
@@ -808,22 +1170,33 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
                 className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-bold rounded-xl text-xs transition flex items-center gap-2 shadow-lg shadow-blue-600/30"
               >
                 <Camera size={16} />
-                <span>{isCameraLoading ? 'Načítání...' : 'Spustit Kameru Mobilu'}</span>
+                <span>{isCameraLoading ? 'Načítání...' : 'Spustit Kameru'}</span>
               </button>
             ) : (
               <>
+                {/* Instant OCR Capture button from active camera */}
+                <button
+                  onClick={handleCaptureFrameForOcr}
+                  disabled={isOcrProcessing}
+                  className="px-4 py-2.5 bg-cyan-600 hover:bg-cyan-500 active:bg-cyan-700 text-white font-extrabold rounded-xl text-xs transition flex items-center gap-2 shadow-lg shadow-cyan-600/30"
+                  title="Vyfotit a přečíst tištěné číslo ISBN z kamery"
+                >
+                  <ScanText size={16} />
+                  <span>{isOcrProcessing ? 'Rozpoznávám text...' : 'Přečíst ISBN z kamery (OCR)'}</span>
+                </button>
+
                 {isScanPaused ? (
                   <button
                     onClick={handleResumeScanning}
                     className="px-4 py-2.5 bg-emerald-500 hover:bg-emerald-400 active:bg-emerald-600 text-slate-950 font-extrabold rounded-xl text-xs transition flex items-center gap-2 shadow-lg shadow-emerald-500/30"
                   >
                     <Play size={16} />
-                    <span>Povolit skenování další knihy</span>
+                    <span>Pokračovat ve skenování</span>
                   </button>
                 ) : (
                   <div className="px-3 py-1.5 bg-blue-500/20 text-blue-300 border border-blue-500/30 rounded-xl text-xs flex items-center gap-1.5 font-medium">
                     <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                    <span>Aktivní skenování...</span>
+                    <span>Kamera aktivní</span>
                   </div>
                 )}
 
@@ -832,7 +1205,7 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
                   className="px-4 py-2.5 bg-red-600 hover:bg-red-500 active:bg-red-700 text-white font-bold rounded-xl text-xs transition flex items-center gap-2 shadow-lg shadow-red-600/30"
                 >
                   <CameraOff size={16} />
-                  <span>Vypnout Kameru</span>
+                  <span>Vypnout</span>
                 </button>
               </>
             )}
@@ -1132,7 +1505,7 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
           <div className="text-center py-8 text-slate-600 text-sm">
             {scanInput
               ? 'Pro zadaný požadavek nebyly nalezeny žádné odpovídající knihy.'
-              : 'Zadejte dotaz výše nebo naskenujte QR kód pro zobrazení výsledků rozpoznání.'}
+              : 'Zadejte dotaz výše, přečtěte tištěné ISBN pomocí OCR nebo naskenujte QR kód pro zobrazení výsledků.'}
           </div>
         ) : (
           <div className="space-y-3">
@@ -1189,7 +1562,7 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
                     <p className="text-xs text-slate-600 font-medium">{book.author} • {book.category}</p>
 
                     <div className="flex items-center gap-4 text-xs font-mono text-slate-600 mt-1">
-                      <span>ISBN: {book.isbn}</span>
+                      <span className="font-bold text-slate-800">ISBN: {book.isbn}</span>
                       <span>Kód: {book.code}</span>
                       <span className="font-sans text-blue-700 font-semibold">{book.location}</span>
                     </div>
