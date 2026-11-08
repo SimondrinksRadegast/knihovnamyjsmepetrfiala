@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import type { Book, UserRole, BookStatus } from '../types';
-import { Plus, Edit2, Trash2, Save, X, Search, QrCode, Sparkles, BookOpen, RefreshCw, ExternalLink, CheckCircle2 } from 'lucide-react';
+import { Plus, Edit2, Trash2, Save, X, Search, QrCode, Sparkles, BookOpen, RefreshCw, ExternalLink, CheckCircle2, Copy, Layers } from 'lucide-react';
 import { fetchNewestCoverResultFromKnihovny, fetchBookDetailsFromKnihovny, getReliableCoverUrl } from '../services/knihovnyCover';
 
 const CURRENT_YEAR = new Date().getFullYear();
@@ -26,8 +26,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 }) => {
   const isLeader = userRole === 'vedouci';
   const [filterQuery, setFilterQuery] = useState('');
+  const [filterStatus, setFilterStatus] = useState<string>('Vše');
+  const [filterIsbn, setFilterIsbn] = useState<string>('Vše'); // 'Vše' | 'pouze-s-isbn' | 'bez-isbn'
+  const [tableSortBy, setTableSortBy] = useState<string>('default'); // 'default' | 'title-asc' | 'author-asc' | 'year-desc' | 'year-asc'
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingBookId, setEditingBookId] = useState<string | null>(null);
+  const [isDuplicating, setIsDuplicating] = useState(false);
+  const [selectedBookIds, setSelectedBookIds] = useState<string[]>([]);
 
   // Form State
   const [title, setTitle] = useState('');
@@ -83,11 +88,74 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setIsFetchingCover(false);
     setIsFetchingKnihovnyAll(false);
     setKnihovnySuccessNote(null);
+    setIsDuplicating(false);
     setEditingBookId(null);
     setIsFormOpen(false);
   };
 
+  const handleStartDuplicate = (book: Book) => {
+    setIsDuplicating(true);
+    setEditingBookId(null);
+    setTitle(book.title);
+    setAuthor(book.author);
+    const bookHasNoIsbn = Boolean(book.hasNoIsbn || !book.isbn || book.isbn.toLowerCase() === 'bez isbn');
+    setHasNoIsbn(bookHasNoIsbn);
+    setNoIsbnReason(book.noIsbnReason || 'Vydáno před zavedením ISBN');
+    setIsbn(bookHasNoIsbn ? 'Bez ISBN' : '');
+    // Generate new unique internal code
+    const baseCode = book.code.replace(/-[A-Z0-9]+$/, '');
+    const rand = Math.floor(100 + Math.random() * 900);
+    setCode(`${baseCode || 'LIB'}-DUP-${rand}`);
+    setCategory(book.category);
+    setYear(CURRENT_YEAR);
+    setPublisher(book.publisher);
+    setDescription(book.description);
+    setStatus('Dostupná');
+    setLocation(book.location);
+    setCoverImage(book.coverImage || '');
+    setCoverNote(null);
+    setPageCount(book.pageCount);
+    setLanguage(book.language || 'Čeština');
+    // Pre-suggest next edition
+    const currentEd = book.edition || '1. vydání';
+    const match = currentEd.match(/(\d+)\./);
+    const nextEdNumber = match ? parseInt(match[1], 10) + 1 : 2;
+    setEdition(`${nextEdNumber}. vydání`);
+    setPhysicalDetails(book.physicalDetails || '');
+    setSourceUrl(book.sourceUrl || '');
+    setNotes(`Duplikováno / Odlišné vydání k titulu ${book.title}. Původní kód: ${book.code}`);
+    setJacketAuthorInfo(book.jacketAuthorInfo || '');
+    setKnihovnySuccessNote(`Vytváříte nové vydání / duplikát knihy "${book.title}". Můžete upravit rok, ISBN, vydání a nakladatele.`);
+    setIsFormOpen(true);
+  };
+
+  const handleBulkDelete = () => {
+    if (!isLeader) return;
+    if (selectedBookIds.length === 0) return;
+    if (confirm(`Opravdu chcete odstranit ${selectedBookIds.length} vybraných knih z fondu?`)) {
+      selectedBookIds.forEach((id) => onDeleteBook(id));
+      setSelectedBookIds([]);
+      setNotificationMsg(`${selectedBookIds.length} knih bylo úspěšně odstraněno.`);
+      setTimeout(() => setNotificationMsg(null), 5000);
+    }
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedBookIds.length === filteredBooks.length) {
+      setSelectedBookIds([]);
+    } else {
+      setSelectedBookIds(filteredBooks.map((b) => b.id));
+    }
+  };
+
+  const toggleSelectBook = (id: string) => {
+    setSelectedBookIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
+
   const handleStartEdit = (book: Book) => {
+    setIsDuplicating(false);
     setEditingBookId(book.id);
     setTitle(book.title);
     setAuthor(book.author);
@@ -181,6 +249,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   const handleStartAdd = () => {
     resetForm();
+    setIsDuplicating(false);
     setCode(`LIB-AUTO-${Math.floor(100 + Math.random() * 900)}`);
     setIsFormOpen(true);
   };
@@ -288,20 +357,45 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         notes: finalNotes,
         jacketAuthorInfo: finalJacketAuthorInfo,
       });
-      setNotificationMsg(`Kniha "${title}" byla přidána do databáze s informacemi z Knihovny.cz.`);
+      setNotificationMsg(
+        isDuplicating
+          ? `Nové vydání / duplikát knihy "${title}" (${finalEdition || 'vydání'}) bylo úspěšně vytvořeno.`
+          : `Kniha "${title}" byla přidána do databáze s informacemi z Knihovny.cz.`
+      );
     }
 
     setTimeout(() => setNotificationMsg(null), 5000);
     resetForm();
   };
 
-  const filteredBooks = books.filter(
-    (b) =>
-      b.title.toLowerCase().includes(filterQuery.toLowerCase()) ||
-      b.author.toLowerCase().includes(filterQuery.toLowerCase()) ||
-      b.code.toLowerCase().includes(filterQuery.toLowerCase()) ||
-      b.isbn.includes(filterQuery)
-  );
+  const q = filterQuery.toLowerCase().trim();
+  const filteredBooks = books.filter((b) => {
+    const matchesSearch =
+      !q ||
+      b.title.toLowerCase().includes(q) ||
+      b.author.toLowerCase().includes(q) ||
+      b.code.toLowerCase().includes(q) ||
+      b.isbn.includes(q);
+
+    const matchesStatus = filterStatus === 'Vše' || b.status === filterStatus;
+
+    let matchesIsbn = true;
+    const isWithoutIsbn = Boolean(b.hasNoIsbn || !b.isbn || b.isbn.toLowerCase() === 'bez isbn');
+    if (filterIsbn === 'pouze-s-isbn') matchesIsbn = !isWithoutIsbn;
+    if (filterIsbn === 'bez-isbn') matchesIsbn = isWithoutIsbn;
+
+    return matchesSearch && matchesStatus && matchesIsbn;
+  });
+
+  if (tableSortBy === 'title-asc') {
+    filteredBooks.sort((a, b) => a.title.localeCompare(b.title, 'cs'));
+  } else if (tableSortBy === 'author-asc') {
+    filteredBooks.sort((a, b) => a.author.localeCompare(b.author, 'cs'));
+  } else if (tableSortBy === 'year-desc') {
+    filteredBooks.sort((a, b) => b.year - a.year);
+  } else if (tableSortBy === 'year-asc') {
+    filteredBooks.sort((a, b) => a.year - b.year);
+  }
 
   return (
     <div className="space-y-6">
@@ -359,8 +453,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full p-6 space-y-5 border border-slate-100 my-8">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                {editingBookId ? <Edit2 size={18} className="text-blue-600" /> : <Plus size={18} className="text-blue-600" />}
-                <span>{editingBookId ? 'Úprava záznamu knihy' : 'Přidání nové knihy do databáze'}</span>
+                {editingBookId ? (
+                  <Edit2 size={18} className="text-blue-600" />
+                ) : isDuplicating ? (
+                  <Copy size={18} className="text-indigo-600" />
+                ) : (
+                  <Plus size={18} className="text-blue-600" />
+                )}
+                <span>
+                  {editingBookId
+                    ? 'Úprava záznamu knihy'
+                    : isDuplicating
+                    ? 'Duplikace / Tvorba nového vydání knihy'
+                    : 'Přidání nové knihy do databáze'}
+                </span>
               </h3>
               <button onClick={resetForm} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg">
                 <X size={20} />
@@ -721,7 +827,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
                 >
                   <Save size={16} />
-                  <span>{editingBookId ? 'Uložit změny' : 'Přidat do databáze'}</span>
+                  <span>{editingBookId ? 'Uložit změny' : isDuplicating ? 'Uložit nové vydání / duplikát' : 'Přidat do databáze'}</span>
                 </button>
               </div>
             </form>
@@ -731,27 +837,87 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
       {/* Database Table */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200/80 overflow-hidden">
-        <div className="p-4 border-b border-slate-100 flex items-center justify-between gap-4">
-          <div className="relative max-w-sm w-full">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-            <input
-              type="text"
-              value={filterQuery}
-              onChange={(e) => setFilterQuery(e.target.value)}
-              placeholder="Rychlý filtr tabulky..."
-              className="w-full bg-slate-50 text-xs pl-9 pr-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
+        <div className="p-4 border-b border-slate-100 flex flex-wrap items-center justify-between gap-4">
+          <div className="flex flex-wrap items-center gap-3 flex-1 min-w-[280px]">
+            <div className="relative max-w-xs w-full">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+              <input
+                type="text"
+                value={filterQuery}
+                onChange={(e) => setFilterQuery(e.target.value)}
+                placeholder="Rychlý filtr tabulky..."
+                className="w-full bg-slate-50 text-xs pl-9 pr-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            <select
+              value={filterStatus}
+              onChange={(e) => setFilterStatus(e.target.value)}
+              className="bg-slate-50 border border-slate-200 text-slate-700 text-xs rounded-xl px-2.5 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="Vše">Všechny stavy</option>
+              <option value="Dostupná">Dostupná</option>
+              <option value="Vypůjčená">Vypůjčená</option>
+              <option value="V restralizaci">V restaurování</option>
+              <option value="Ztracená">Ztracená</option>
+            </select>
+
+            <select
+              value={filterIsbn}
+              onChange={(e) => setFilterIsbn(e.target.value)}
+              className="bg-slate-50 border border-slate-200 text-slate-700 text-xs rounded-xl px-2.5 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="Vše">Všechny záznamy</option>
+              <option value="pouze-s-isbn">Pouze s ISBN</option>
+              <option value="bez-isbn">Bez ISBN (staré tisky)</option>
+            </select>
+
+            <select
+              value={tableSortBy}
+              onChange={(e) => setTableSortBy(e.target.value)}
+              className="bg-slate-50 border border-slate-200 text-slate-700 text-xs rounded-xl px-2.5 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="default">Výchozí řazení</option>
+              <option value="title-asc">Název (A–Z)</option>
+              <option value="author-asc">Autor (A–Z)</option>
+              <option value="year-desc">Rok (od nejnovějšího)</option>
+              <option value="year-asc">Rok (od nejstaršího)</option>
+            </select>
           </div>
-          <span className="text-xs text-slate-600 font-medium">Celkem záznamů: {filteredBooks.length}</span>
+
+          <div className="flex items-center gap-3">
+            {isLeader && selectedBookIds.length > 0 && (
+              <button
+                onClick={handleBulkDelete}
+                className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm animate-in fade-in"
+              >
+                <Trash2 size={14} />
+                <span>Smazat vybrané ({selectedBookIds.length})</span>
+              </button>
+            )}
+            <span className="text-xs text-slate-600 font-medium">Celkem záznamů: {filteredBooks.length}</span>
+          </div>
         </div>
 
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs text-slate-600">
             <thead className="bg-slate-50 uppercase text-[11px] font-bold text-slate-600 border-b border-slate-200">
               <tr>
+                {isLeader && (
+                  <th className="py-3 px-3 w-8">
+                    <input
+                      type="checkbox"
+                      checked={filteredBooks.length > 0 && selectedBookIds.length === filteredBooks.length}
+                      onChange={toggleSelectAll}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                      title="Vybrat vše"
+                    />
+                  </th>
+                )}
                 <th className="py-3 px-4">Přebal</th>
                 <th className="py-3 px-4">Kód & ISBN</th>
                 <th className="py-3 px-4">Kniha / Autor</th>
+                <th className="py-3 px-4">Vydání & Rok</th>
                 <th className="py-3 px-4">Kategorie</th>
                 <th className="py-3 px-4">Umístění</th>
                 <th className="py-3 px-4">Stav</th>
@@ -760,7 +926,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </thead>
             <tbody className="divide-y divide-slate-100 font-medium">
               {filteredBooks.map((book) => (
-                <tr key={book.id} className="hover:bg-slate-50/80 transition">
+                <tr key={book.id} className={`hover:bg-slate-50/80 transition ${selectedBookIds.includes(book.id) ? 'bg-blue-50/50' : ''}`}>
+                  {isLeader && (
+                    <td className="py-3 px-3">
+                      <input
+                        type="checkbox"
+                        checked={selectedBookIds.includes(book.id)}
+                        onChange={() => toggleSelectBook(book.id)}
+                        className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                      />
+                    </td>
+                  )}
                   <td className="py-3 px-4 whitespace-nowrap">
                     <div className="w-10 h-14 bg-slate-100 rounded-lg overflow-hidden border border-slate-200 shadow-sm flex items-center justify-center shrink-0">
                       {book.coverImage ? (
@@ -795,24 +971,29 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
                   <td className="py-3 px-4">
                     <div className="font-bold text-slate-900 text-sm">{book.title}</div>
-                    <div className="text-slate-600">{book.author} ({book.year})</div>
-                    {(book.pageCount || book.language || book.sourceUrl) && (
-                      <div className="text-[11px] text-slate-500 flex items-center gap-2 mt-0.5">
-                        {book.pageCount && <span>{book.pageCount} str.</span>}
-                        {book.language && <span>• {book.language}</span>}
-                        {book.sourceUrl && (
-                          <a
-                            href={book.sourceUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-blue-600 hover:underline flex items-center gap-0.5"
-                          >
-                            <span>Knihovny.cz</span>
-                            <ExternalLink size={10} />
-                          </a>
-                        )}
-                      </div>
-                    )}
+                    <div className="text-slate-600">{book.author}</div>
+                    {/* Edition count indicator if other editions exist */}
+                    {(() => {
+                      const otherEditionsCount = books.filter(
+                        (b) =>
+                          b.id !== book.id &&
+                          b.title.trim().toLowerCase() === book.title.trim().toLowerCase() &&
+                          b.author.trim().toLowerCase() === book.author.trim().toLowerCase()
+                      ).length;
+                      if (otherEditionsCount > 0) {
+                        return (
+                          <span className="inline-flex items-center gap-1 mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                            <Layers size={10} /> {otherEditionsCount + 1} vydání v evidenci
+                          </span>
+                        );
+                      }
+                      return null;
+                    })()}
+                  </td>
+
+                  <td className="py-3 px-4 whitespace-nowrap">
+                    <div className="font-semibold text-slate-800">{book.edition || '1. vydání'}</div>
+                    <div className="text-[11px] text-slate-500">{book.publisher ? `${book.publisher}, ` : ''}{book.year}</div>
                   </td>
 
                   <td className="py-3 px-4 whitespace-nowrap">{book.category}</td>
@@ -844,6 +1025,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           <QrCode size={16} />
                         </button>
                       )}
+
+                      <button
+                        onClick={() => handleStartDuplicate(book)}
+                        title="Duplikovat knihu / Vytvořit jiné vydání"
+                        className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition"
+                      >
+                        <Copy size={16} />
+                      </button>
 
                       <button
                         onClick={() => handleStartEdit(book)}
