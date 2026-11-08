@@ -22,6 +22,9 @@ import {
   Hash,
   ScanText,
   Check,
+  Keyboard,
+  Info,
+  AlertTriangle,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
@@ -29,6 +32,9 @@ import { fetchBookDetailsFromKnihovny, getReliableCoverUrl } from '../services/k
 import {
   recognizeIsbnFromImage,
   extractIsbnFromText,
+  isValidIsbn10,
+  isValidIsbn13,
+  formatIsbn,
   type IsbnRecognitionResult,
 } from '../services/isbnOcr';
 
@@ -62,7 +68,7 @@ interface BookScannerProps {
 
 export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookStatus, onAddBook }) => {
   const [scanInput, setScanInput] = useState('');
-  const [scanMode, setScanMode] = useState<'all' | 'isbn' | 'ocr-isbn' | 'code' | 'text' | 'cover'>('all');
+  const [scanMode, setScanMode] = useState<'all' | 'isbn' | 'ocr-isbn' | 'code' | 'text' | 'cover' | 'manual-isbn'>('all');
   const [matchedBooks, setMatchedBooks] = useState<Book[]>([]);
   const [isSimulatingCamera, setIsSimulatingCamera] = useState(false);
   const [lastScannedResult, setLastScannedResult] = useState<string | null>(null);
@@ -97,6 +103,10 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
 
   // Editable fields for Knihovny result before adding to DB
   const [editableKnihovnyBook, setEditableKnihovnyBook] = useState<KnihovnyBookResult | null>(null);
+
+  // Manual ISBN input state
+  const [manualIsbnInput, setManualIsbnInput] = useState('');
+  const [manualIsbnReason, setManualIsbnReason] = useState<string>('skvrna');
 
   const searchKnihovnyCz = async (rawIsbn: string) => {
     const cleanIsbn = rawIsbn.trim().replace(/[- ]/g, '');
@@ -182,7 +192,7 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
     setTimeout(() => setActionSuccessMessage(null), 5000);
   };
 
-  const handleSearch = (query: string, modeOverride?: 'all' | 'isbn' | 'ocr-isbn' | 'code' | 'text' | 'cover') => {
+  const handleSearch = (query: string, modeOverride?: 'all' | 'isbn' | 'ocr-isbn' | 'code' | 'text' | 'cover' | 'manual-isbn') => {
     const activeMode = modeOverride || scanMode;
     setScanInput(query);
     const cleanQuery = query.trim().toLowerCase();
@@ -196,7 +206,7 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
     }
 
     const digitsOnly = query.replace(/[- ]/g, '');
-    if (activeMode === 'isbn' || activeMode === 'ocr-isbn' || /^\d{10}(\d{3})?$/.test(digitsOnly)) {
+    if (activeMode === 'isbn' || activeMode === 'ocr-isbn' || activeMode === 'manual-isbn' || /^\d{10}(\d{3})?$/.test(digitsOnly)) {
       searchKnihovnyCz(query);
     } else {
       setKnihovnyResult(null);
@@ -206,7 +216,7 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
     const confMap: Record<string, number> = {};
 
     const results = books.filter((book) => {
-      if (activeMode === 'isbn' || activeMode === 'ocr-isbn') {
+      if (activeMode === 'isbn' || activeMode === 'ocr-isbn' || activeMode === 'manual-isbn') {
         return book.isbn.toLowerCase().replace(/[- ]/g, '').includes(cleanQuery.replace(/[- ]/g, ''));
       }
       if (activeMode === 'code') {
@@ -679,6 +689,19 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
               </button>
               <button
                 onClick={() => {
+                  setScanMode('manual-isbn');
+                  handleSearch(scanInput, 'manual-isbn');
+                }}
+                className={`px-2.5 py-1 rounded-md font-medium transition flex items-center gap-1 ${
+                  scanMode === 'manual-isbn' ? 'bg-amber-600 text-white shadow-sm font-bold' : 'text-amber-900 hover:bg-amber-50 font-medium'
+                }`}
+                title="Ruční zápis ISBN v případě nečitelného kódu či skvrny na knize"
+              >
+                <Keyboard size={13} />
+                <span>Ruční zápis ISBN</span>
+              </button>
+              <button
+                onClick={() => {
                   setScanMode('ocr-isbn');
                   handleSearch(scanInput, 'ocr-isbn');
                 }}
@@ -742,9 +765,11 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
             <input
               type="text"
               value={scanInput}
-              onChange={(e) => handleSearch(e.target.value)}
+              onChange={(e) => handleSearch(e.target.value, scanMode)}
               placeholder={
-                scanMode === 'ocr-isbn'
+                scanMode === 'manual-isbn'
+                  ? 'Zadejte číslo ISBN ručně (např. 978-80-7390-348-1)...'
+                  : scanMode === 'ocr-isbn'
                   ? 'Rozpoznané číslo ISBN bez čárového kódu (např. 978-80-7390-348-1)...'
                   : scanMode === 'cover'
                   ? 'Zadejte text z přebalu, jméno autora nebo vizuální prvky obalu...'
@@ -776,6 +801,205 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
               </button>
             )}
           </div>
+
+          {/* Manual ISBN Input Panel for stained / damaged books */}
+          {scanMode === 'manual-isbn' && (() => {
+            const cleanManual = manualIsbnInput.replace(/[^0-9Xx]/g, '');
+            const is13 = cleanManual.length === 13;
+            const is10 = cleanManual.length === 10;
+            const valid13 = is13 && isValidIsbn13(cleanManual);
+            const valid10 = is10 && isValidIsbn10(cleanManual);
+            const formatted = formatIsbn(cleanManual);
+            const hasInvalidLength = cleanManual.length > 0 && !is10 && !is13;
+            const hasInvalidChecksum = (is13 && !valid13) || (is10 && !valid10);
+            const isValid = valid13 || valid10;
+
+            const handleApplyManualIsbn = (isbnVal: string) => {
+              const cleaned = isbnVal.trim();
+              setScanInput(cleaned);
+              handleSearch(cleaned, 'manual-isbn');
+              setLastScannedResult(`Ručně zadané ISBN: ${cleaned}`);
+            };
+
+            return (
+              <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-4 space-y-4 animate-in fade-in">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-200/80 pb-2.5">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 bg-amber-600 text-white rounded-lg shadow-xs">
+                      <Keyboard size={16} />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-amber-950 uppercase tracking-wide">
+                        Ruční zápis ISBN (při nečitelnosti či poškození)
+                      </h4>
+                      <p className="text-[11px] text-amber-800">
+                        Zadejte číslo z knihy v případě, že je čárový kód nebo tiráž poškozena skvrnou, opotřebením či špatným tiskem.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 text-[11px] text-amber-900 bg-white/80 border border-amber-300 px-2 py-1 rounded-lg">
+                    <Info size={13} className="text-amber-700 shrink-0" />
+                    <span>Důvod:</span>
+                    <select
+                      value={manualIsbnReason}
+                      onChange={(e) => setManualIsbnReason(e.target.value)}
+                      className="bg-transparent font-semibold text-amber-950 focus:outline-none cursor-pointer"
+                    >
+                      <option value="skvrna">Skvrna / politá kniha</option>
+                      <option value="poskozeni">Poškozený / stržený kód</option>
+                      <option value="opotrebovano">Opotřebovaný / vybledlý tisk</option>
+                      <option value="chybi_ean">Kniha bez čárového kódu</option>
+                      <option value="kamera_selhala">Kamera nemůže zaostřit</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Direct Manual ISBN Input Field */}
+                <div className="space-y-2">
+                  <label className="block text-[11px] font-bold text-amber-950 uppercase">
+                    Zadejte číslo ISBN (10 nebo 13 číslic, pomlčky se doplní automaticky):
+                  </label>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <div className="relative flex-1">
+                      <input
+                        type="text"
+                        value={manualIsbnInput}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setManualIsbnInput(val);
+                          handleApplyManualIsbn(val);
+                        }}
+                        placeholder="Např. 978-80-7390-348-1 nebo 80-207-1830-5..."
+                        className="w-full text-sm font-mono p-2.5 bg-white border border-amber-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:outline-none text-slate-900 font-bold"
+                      />
+                      {manualIsbnInput && (
+                        <button
+                          onClick={() => {
+                            setManualIsbnInput('');
+                            setScanInput('');
+                            setMatchedBooks([]);
+                            setKnihovnyResult(null);
+                          }}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs p-1"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleApplyManualIsbn(manualIsbnInput)}
+                      disabled={!manualIsbnInput.trim()}
+                      className="px-4 py-2 bg-amber-600 hover:bg-amber-700 disabled:bg-amber-300 text-white font-bold text-xs rounded-lg transition flex items-center justify-center gap-1.5 shadow-xs"
+                    >
+                      <Search size={14} />
+                      <span>Ověřit & Vyhledat</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Live validation card */}
+                {manualIsbnInput.trim() && (
+                  <div className="bg-white p-3 rounded-xl border border-amber-200 space-y-2 text-xs">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-bold text-slate-800 flex items-center gap-1.5">
+                        <Hash size={14} className="text-amber-600" /> Analýza zadaného čísla:
+                      </span>
+
+                      {isValid ? (
+                        <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 font-extrabold flex items-center gap-1 text-[11px]">
+                          <Check size={13} /> Platné {is13 ? 'ISBN-13' : 'ISBN-10'} (Kontrolní součet v pořádku)
+                        </span>
+                      ) : hasInvalidChecksum ? (
+                        <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-300 font-bold flex items-center gap-1 text-[11px]">
+                          <AlertTriangle size={13} /> Neplatný kontrolní součet {is13 ? 'ISBN-13' : 'ISBN-10'}
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300 font-medium text-[11px]">
+                          Zadáno {cleanManual.length} číslic (očekáváno 10 nebo 13)
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 flex flex-wrap items-center justify-between gap-2">
+                      <div className="font-mono">
+                        <span className="text-[11px] text-slate-500 block">Formátované zobrazení:</span>
+                        <span className="text-sm font-extrabold text-slate-900">{formatted || manualIsbnInput}</span>
+                      </div>
+                      <div className="font-mono text-slate-500 text-[11px]">
+                        Počet číslic: <span className="font-bold text-slate-800">{cleanManual.length}</span> / 13
+                      </div>
+                    </div>
+
+                    {hasInvalidChecksum && (
+                      <p className="text-[11px] text-rose-700 bg-rose-50 border border-rose-200 p-2 rounded-lg">
+                        <strong>Upozornění:</strong> Poslední kontrolní číslice neodpovídá standardu ISBN. Pokud je na knize skvrna nebo poškození, zkontrolujte, zda nedošlo k záměně číslic (např. 0 vs 8, 1 vs 7, 3 vs 8). Knihovny.cz přesto zkusí vyhledat i takto zadané číslo.
+                      </p>
+                    )}
+
+                    {hasInvalidLength && cleanManual.length > 0 && (
+                      <p className="text-[11px] text-amber-800 bg-amber-50/90 border border-amber-200 p-2 rounded-lg">
+                        Standardní ISBN má buď 10 číslic (starší vydání) nebo 13 číslic (začínající 978 nebo 979). Zkontrolujte chybějící číslice pod případnou skvrnou.
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* Practical tips for damaged/stained books */}
+                <div className="bg-amber-100/50 border border-amber-200 p-3 rounded-xl text-[11px] text-amber-950 space-y-1">
+                  <p className="font-bold flex items-center gap-1.5">
+                    <Info size={13} className="text-amber-700 shrink-0" /> Kde najít náhradní číslo ISBN, když je čárový kód znečištěný skvrnou:
+                  </p>
+                  <ul className="list-disc list-inside space-y-0.5 text-amber-900 pl-1">
+                    <li><strong>Tiráž knihy</strong> – obvykle na úplně poslední straně knihy obsahuje čistě vytištěné číslo ISBN.</li>
+                    <li><strong>Rub titulního listu (Copyright page)</strong> – druhá nebo čtvrtá strana na začátku knihy (vedle tiráže a nakladatele).</li>
+                    <li><strong>Zadní klapka přebalu</strong> – u knih s papírovým přebalem bývá ISBN uvedeno uvnitř na záložce.</li>
+                  </ul>
+                </div>
+
+                {/* Quick Samples for manual testing */}
+                <div>
+                  <p className="text-[11px] font-bold text-amber-950 uppercase mb-1.5 flex items-center gap-1">
+                    <Keyboard size={12} className="text-amber-700" /> Rychlé vyzkoušení vzorových ISBN:
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setManualIsbnInput('978-80-7390-348-1');
+                        handleApplyManualIsbn('978-80-7390-348-1');
+                      }}
+                      className="px-2.5 py-1 bg-white hover:bg-amber-100 text-amber-950 border border-amber-300 rounded-lg text-xs font-mono transition shadow-2xs"
+                    >
+                      <span>978-80-7390-348-1 (Babička)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setManualIsbnInput('978-80-207-1830-2');
+                        handleApplyManualIsbn('978-80-207-1830-2');
+                      }}
+                      className="px-2.5 py-1 bg-white hover:bg-amber-100 text-amber-950 border border-amber-300 rounded-lg text-xs font-mono transition shadow-2xs"
+                    >
+                      <span>978-80-207-1830-2 (R.U.R.)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setManualIsbnInput('978-80-257-2624-2');
+                        handleApplyManualIsbn('978-80-257-2624-2');
+                      }}
+                      className="px-2.5 py-1 bg-white hover:bg-amber-100 text-amber-950 border border-amber-300 rounded-lg text-xs font-mono transition shadow-2xs"
+                    >
+                      <span>978-80-257-2624-2 (Sto kreseb)</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* OCR Panel: Reading printed ISBN numbers without barcode */}
           {scanMode === 'ocr-isbn' && (
@@ -944,6 +1168,24 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
                     <span>📖 Sto kreseb: ISBN 978-80-257-2624-2</span>
                   </button>
                 </div>
+              </div>
+
+              {/* Quick switch if text/photo is stained/illegible */}
+              <div className="bg-amber-50/80 border border-amber-200/90 rounded-xl p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5">
+                <div className="flex items-center gap-2 text-xs text-amber-900">
+                  <AlertTriangle size={15} className="text-amber-600 shrink-0" />
+                  <span>Je text politý skvrnou nebo nečitelný?</span>
+                </div>
+                <button
+                  onClick={() => {
+                    setScanMode('manual-isbn');
+                    handleSearch(scanInput, 'manual-isbn');
+                  }}
+                  className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-xs"
+                >
+                  <Keyboard size={13} />
+                  <span>Přejít na ruční zápis ISBN</span>
+                </button>
               </div>
             </div>
           )}
@@ -1147,6 +1389,20 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
                 <p className="text-xs text-slate-400 mt-1 max-w-xs">
                   Přečte QR kód, čárový kód nebo přímo vytištěné číslo ISBN bez čárového kódu.
                 </p>
+              </div>
+
+              {/* Direct fallback trigger for stained / damaged books */}
+              <div className="pt-2">
+                <button
+                  onClick={() => {
+                    setScanMode('manual-isbn');
+                    handleSearch(scanInput, 'manual-isbn');
+                  }}
+                  className="text-xs bg-slate-800 hover:bg-slate-700 text-amber-300 hover:text-amber-200 px-3 py-1.5 rounded-lg border border-slate-700 hover:border-amber-500/50 transition flex items-center gap-1.5 mx-auto font-medium"
+                >
+                  <Keyboard size={13} />
+                  <span>Kód poškozený či se skvrnou? Zadat ručně</span>
+                </button>
               </div>
             </div>
           ) : null}
