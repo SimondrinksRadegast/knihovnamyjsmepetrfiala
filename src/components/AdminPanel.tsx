@@ -26,6 +26,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 }) => {
   const isLeader = userRole === 'vedouci';
   const [filterQuery, setFilterQuery] = useState('');
+  const [filterField, setFilterField] = useState<'all' | 'title' | 'author'>('all');
   const [filterStatus, setFilterStatus] = useState<string>('Vše');
   const [filterIsbn, setFilterIsbn] = useState<string>('Vše'); // 'Vše' | 'pouze-s-isbn' | 'bez-isbn'
   const [tableSortBy, setTableSortBy] = useState<string>('default'); // 'default' | 'title-asc' | 'author-asc' | 'year-desc' | 'year-asc'
@@ -370,12 +371,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   const q = filterQuery.toLowerCase().trim();
   const filteredBooks = books.filter((b) => {
-    const matchesSearch =
-      !q ||
-      b.title.toLowerCase().includes(q) ||
-      b.author.toLowerCase().includes(q) ||
-      b.code.toLowerCase().includes(q) ||
-      b.isbn.includes(q);
+    let matchesSearch = true;
+    if (q) {
+      if (filterField === 'title') {
+        matchesSearch = b.title.toLowerCase().includes(q);
+      } else if (filterField === 'author') {
+        matchesSearch = b.author.toLowerCase().includes(q);
+      } else {
+        matchesSearch =
+          b.title.toLowerCase().includes(q) ||
+          b.author.toLowerCase().includes(q) ||
+          b.code.toLowerCase().includes(q) ||
+          b.isbn.includes(q);
+      }
+    }
 
     const matchesStatus = filterStatus === 'Vše' || b.status === filterStatus;
 
@@ -839,15 +848,33 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200/80 overflow-hidden">
         <div className="p-4 border-b border-slate-100 flex flex-wrap items-center justify-between gap-4">
           <div className="flex flex-wrap items-center gap-3 flex-1 min-w-[280px]">
-            <div className="relative max-w-xs w-full">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-              <input
-                type="text"
-                value={filterQuery}
-                onChange={(e) => setFilterQuery(e.target.value)}
-                placeholder="Rychlý filtr tabulky..."
-                className="w-full bg-slate-50 text-xs pl-9 pr-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
+            <div className="flex items-center bg-slate-50 rounded-xl border border-slate-200 overflow-hidden max-w-sm w-full focus-within:ring-2 focus-within:ring-blue-500">
+              <select
+                value={filterField}
+                onChange={(e) => setFilterField(e.target.value as 'all' | 'title' | 'author')}
+                className="bg-slate-100 text-[11px] text-slate-700 font-semibold px-2.5 py-2 border-r border-slate-200 focus:outline-none cursor-pointer"
+                title="Hledat podle"
+              >
+                <option value="all">Vše</option>
+                <option value="title">Název</option>
+                <option value="author">Autor</option>
+              </select>
+              <div className="relative flex-1">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
+                <input
+                  type="text"
+                  value={filterQuery}
+                  onChange={(e) => setFilterQuery(e.target.value)}
+                  placeholder={
+                    filterField === 'title'
+                      ? 'Hledat podle názvu...'
+                      : filterField === 'author'
+                      ? 'Hledat podle autora...'
+                      : 'Hledat v tabulce...'
+                  }
+                  className="w-full bg-transparent text-xs pl-8 pr-3 py-2 focus:outline-none"
+                />
+              </div>
             </div>
 
             <select

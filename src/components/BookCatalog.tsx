@@ -1,12 +1,15 @@
 import React from 'react';
-import type { Book, UserRole, BookStatus } from '../types';
-import { BookOpen, MapPin, Tag, CheckCircle, Clock, AlertTriangle, QrCode, ArrowRight, X, Edit3, Save, ExternalLink, Sparkles, BookMarked, Copy, Trash2, Layers, Filter, ArrowUpDown, RotateCcw } from 'lucide-react';
+import type { Book, UserRole, BookStatus, SearchField } from '../types';
+import { BookOpen, MapPin, Tag, CheckCircle, Clock, AlertTriangle, QrCode, ArrowRight, X, Edit3, Save, ExternalLink, Sparkles, BookMarked, Copy, Trash2, Layers, Filter, ArrowUpDown, RotateCcw, Search, User as UserIcon } from 'lucide-react';
 import { getReliableCoverUrl } from '../services/knihovnyCover';
 import { QRCodeSVG } from 'qrcode.react';
 
 interface BookCatalogProps {
   books: Book[];
   searchQuery: string;
+  searchField?: SearchField;
+  onSearchQueryChange?: (query: string) => void;
+  onSearchFieldChange?: (field: SearchField) => void;
   userRole: UserRole;
   onEditBook?: (updatedBook: Book) => void;
   onAddBook?: (newBookData: Omit<Book, 'id' | 'addedDate'>) => void;
@@ -18,6 +21,9 @@ interface BookCatalogProps {
 export const BookCatalog: React.FC<BookCatalogProps> = ({
   books,
   searchQuery,
+  searchField = 'all',
+  onSearchQueryChange,
+  onSearchFieldChange,
   userRole,
   onEditBook,
   onAddBook,
@@ -31,6 +37,10 @@ export const BookCatalog: React.FC<BookCatalogProps> = ({
   const [selectedYearEra, setSelectedYearEra] = React.useState<string>('Vše'); // 'Vše' | 'do-1950' | '1951-2000' | 'po-2000'
   const [sortBy, setSortBy] = React.useState<string>('default'); // 'default' | 'title-asc' | 'title-desc' | 'author-asc' | 'year-desc' | 'year-asc'
   const [activeBookId, setActiveBookId] = React.useState<string | null>(null);
+
+  // Dedicated author & title specific search inputs for fine-grained search
+  const [titleSearch, setTitleSearch] = React.useState<string>('');
+  const [authorSearch, setAuthorSearch] = React.useState<string>('');
 
   // Manual inline edit state in detail modal
   const [isEditingInModal, setIsEditingInModal] = React.useState(false);
@@ -136,6 +146,10 @@ export const BookCatalog: React.FC<BookCatalogProps> = ({
     setSelectedIsbnFilter('Vše');
     setSelectedYearEra('Vše');
     setSortBy('default');
+    setTitleSearch('');
+    setAuthorSearch('');
+    if (onSearchQueryChange) onSearchQueryChange('');
+    if (onSearchFieldChange) onSearchFieldChange('all');
   };
 
   const isAnyFilterActive =
@@ -144,19 +158,42 @@ export const BookCatalog: React.FC<BookCatalogProps> = ({
     selectedIsbnFilter !== 'Vše' ||
     selectedYearEra !== 'Vše' ||
     sortBy !== 'default' ||
-    Boolean(searchQuery.trim());
+    Boolean(searchQuery.trim()) ||
+    Boolean(titleSearch.trim()) ||
+    Boolean(authorSearch.trim()) ||
+    searchField !== 'all';
 
-  // Filter books based on search query, category, status, ISBN presence/multiple editions, and era
+  // Filter books based on search query, dedicated author/title search, category, status, ISBN presence/multiple editions, and era
   const filteredBooks = React.useMemo(() => {
     const result = books.filter((book) => {
+      // 1. Global / Header search query
       const q = searchQuery.toLowerCase().trim();
-      const matchesSearch =
-        !q ||
-        book.title.toLowerCase().includes(q) ||
-        book.author.toLowerCase().includes(q) ||
-        book.isbn.toLowerCase().includes(q) ||
-        book.code.toLowerCase().includes(q) ||
-        book.description.toLowerCase().includes(q);
+      let matchesSearch = true;
+      if (q) {
+        if (searchField === 'title') {
+          matchesSearch = book.title.toLowerCase().includes(q);
+        } else if (searchField === 'author') {
+          matchesSearch = book.author.toLowerCase().includes(q);
+        } else if (searchField === 'title_and_author') {
+          matchesSearch =
+            book.title.toLowerCase().includes(q) || book.author.toLowerCase().includes(q);
+        } else {
+          matchesSearch =
+            book.title.toLowerCase().includes(q) ||
+            book.author.toLowerCase().includes(q) ||
+            book.isbn.toLowerCase().includes(q) ||
+            book.code.toLowerCase().includes(q) ||
+            book.description.toLowerCase().includes(q);
+        }
+      }
+
+      // 2. Dedicated title search
+      const qTitle = titleSearch.toLowerCase().trim();
+      const matchesTitle = !qTitle || book.title.toLowerCase().includes(qTitle);
+
+      // 3. Dedicated author search
+      const qAuthor = authorSearch.toLowerCase().trim();
+      const matchesAuthor = !qAuthor || book.author.toLowerCase().includes(qAuthor);
 
       const matchesCategory = selectedCategory === 'Vše' || book.category === selectedCategory;
       const matchesStatus = selectedStatus === 'Vše' || book.status === selectedStatus;
@@ -187,7 +224,7 @@ export const BookCatalog: React.FC<BookCatalogProps> = ({
         matchesYear = book.year > 2000;
       }
 
-      return matchesSearch && matchesCategory && matchesStatus && matchesIsbn && matchesYear;
+      return matchesSearch && matchesTitle && matchesAuthor && matchesCategory && matchesStatus && matchesIsbn && matchesYear;
     });
 
     // Sorting
@@ -205,7 +242,7 @@ export const BookCatalog: React.FC<BookCatalogProps> = ({
     }
 
     return sorted;
-  }, [books, searchQuery, selectedCategory, selectedStatus, selectedIsbnFilter, selectedYearEra, sortBy]);
+  }, [books, searchQuery, searchField, titleSearch, authorSearch, selectedCategory, selectedStatus, selectedIsbnFilter, selectedYearEra, sortBy]);
 
   const getStatusBadge = (status: Book['status']) => {
     switch (status) {
@@ -249,6 +286,107 @@ export const BookCatalog: React.FC<BookCatalogProps> = ({
 
       {/* Category and Extended Filter Toolbar */}
       <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200/80 space-y-3.5">
+        {/* Dedicated Author and Title Search Inputs */}
+        <div className="bg-slate-50/90 p-3 rounded-xl border border-slate-200/70 space-y-2">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-700">
+              <Search size={14} className="text-blue-600" />
+              <span>Hledat podle autora a názvu</span>
+            </div>
+            {onSearchFieldChange && (
+              <div className="flex items-center gap-1 text-xs">
+                <span className="text-slate-500 text-[11px] font-medium mr-1">Režim hledání:</span>
+                <button
+                  type="button"
+                  onClick={() => onSearchFieldChange('all')}
+                  className={`px-2 py-0.5 rounded text-[11px] font-medium transition ${
+                    searchField === 'all'
+                      ? 'bg-blue-600 text-white font-bold'
+                      : 'bg-white text-slate-600 hover:bg-slate-200 border border-slate-200'
+                  }`}
+                >
+                  Vše
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onSearchFieldChange('title')}
+                  className={`px-2 py-0.5 rounded text-[11px] font-medium transition ${
+                    searchField === 'title'
+                      ? 'bg-blue-600 text-white font-bold'
+                      : 'bg-white text-slate-600 hover:bg-slate-200 border border-slate-200'
+                  }`}
+                >
+                  Pouze název
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onSearchFieldChange('author')}
+                  className={`px-2 py-0.5 rounded text-[11px] font-medium transition ${
+                    searchField === 'author'
+                      ? 'bg-blue-600 text-white font-bold'
+                      : 'bg-white text-slate-600 hover:bg-slate-200 border border-slate-200'
+                  }`}
+                >
+                  Pouze autor
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onSearchFieldChange('title_and_author')}
+                  className={`px-2 py-0.5 rounded text-[11px] font-medium transition ${
+                    searchField === 'title_and_author'
+                      ? 'bg-blue-600 text-white font-bold'
+                      : 'bg-white text-slate-600 hover:bg-slate-200 border border-slate-200'
+                  }`}
+                >
+                  Název i autor
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+            <div className="relative">
+              <BookOpen className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+              <input
+                type="text"
+                value={titleSearch}
+                onChange={(e) => setTitleSearch(e.target.value)}
+                placeholder="Hledat podle názvu knihy (např. Babička, R.U.R.)..."
+                className="w-full bg-white text-slate-800 text-xs pl-8 pr-7 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium placeholder-slate-400"
+              />
+              {titleSearch && (
+                <button
+                  type="button"
+                  onClick={() => setTitleSearch('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs p-1"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+
+            <div className="relative">
+              <UserIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+              <input
+                type="text"
+                value={authorSearch}
+                onChange={(e) => setAuthorSearch(e.target.value)}
+                placeholder="Hledat podle autora (např. Karel Čapek, Božena Němcová)..."
+                className="w-full bg-white text-slate-800 text-xs pl-8 pr-7 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium placeholder-slate-400"
+              />
+              {authorSearch && (
+                <button
+                  type="button"
+                  onClick={() => setAuthorSearch('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs p-1"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2 overflow-x-auto pb-1 max-w-full">
             <span className="text-xs font-bold uppercase tracking-wider text-slate-600 mr-1">Kategorie:</span>

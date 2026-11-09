@@ -68,7 +68,7 @@ interface BookScannerProps {
 
 export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookStatus, onAddBook }) => {
   const [scanInput, setScanInput] = useState('');
-  const [scanMode, setScanMode] = useState<'all' | 'isbn' | 'ocr-isbn' | 'code' | 'text' | 'cover' | 'manual-isbn' | 'no-isbn'>('all');
+  const [scanMode, setScanMode] = useState<'all' | 'isbn' | 'ocr-isbn' | 'code' | 'title' | 'author' | 'text' | 'cover' | 'manual-isbn' | 'no-isbn'>('all');
   const [matchedBooks, setMatchedBooks] = useState<Book[]>([]);
   const [lastScannedResult, setLastScannedResult] = useState<string | null>(null);
   const [actionSuccessMessage, setActionSuccessMessage] = useState<string | null>(null);
@@ -246,7 +246,7 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
     setTimeout(() => setActionSuccessMessage(null), 5000);
   };
 
-  const handleSearch = (query: string, modeOverride?: 'all' | 'isbn' | 'ocr-isbn' | 'code' | 'text' | 'cover' | 'manual-isbn' | 'no-isbn') => {
+  const handleSearch = (query: string, modeOverride?: 'all' | 'isbn' | 'ocr-isbn' | 'code' | 'title' | 'author' | 'text' | 'cover' | 'manual-isbn' | 'no-isbn') => {
     const activeMode = modeOverride || scanMode;
     setScanInput(query);
     const cleanQuery = query.trim().toLowerCase();
@@ -275,6 +275,12 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
       }
       if (activeMode === 'code') {
         return book.code.toLowerCase().includes(cleanQuery);
+      }
+      if (activeMode === 'title') {
+        return book.title.toLowerCase().includes(cleanQuery);
+      }
+      if (activeMode === 'author') {
+        return book.author.toLowerCase().includes(cleanQuery);
       }
       if (activeMode === 'text') {
         return book.title.toLowerCase().includes(cleanQuery) || book.author.toLowerCase().includes(cleanQuery);
@@ -765,6 +771,28 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
               </button>
               <button
                 onClick={() => {
+                  setScanMode('title');
+                  handleSearch(scanInput, 'title');
+                }}
+                className={`px-2.5 py-1 rounded-md font-medium transition ${
+                  scanMode === 'title' ? 'bg-white text-blue-700 shadow-sm font-bold' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Název
+              </button>
+              <button
+                onClick={() => {
+                  setScanMode('author');
+                  handleSearch(scanInput, 'author');
+                }}
+                className={`px-2.5 py-1 rounded-md font-medium transition ${
+                  scanMode === 'author' ? 'bg-white text-blue-700 shadow-sm font-bold' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Autor
+              </button>
+              <button
+                onClick={() => {
                   setScanMode('text');
                   handleSearch(scanInput, 'text');
                 }}
@@ -772,7 +800,7 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
                   scanMode === 'text' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                Název
+                Název + Autor
               </button>
             </div>
           </div>
@@ -795,6 +823,10 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
                   ? 'Zadejte nebo naskenujte ISBN (např. 978-80-7390-348-1)...'
                   : scanMode === 'code'
                   ? 'Zadejte nebo naskenujte kód knihy (např. LIB-BOZ-001)...'
+                  : scanMode === 'title'
+                  ? 'Zadejte název knihy (např. Babička, R.U.R.)...'
+                  : scanMode === 'author'
+                  ? 'Zadejte jméno autora (např. Karel Čapek, Božena Němcová)...'
                   : scanMode === 'text'
                   ? 'Zadejte název knihy nebo autora (např. Babička)...'
                   : 'Napište jakýkoliv údaj, kód, ISBN nebo název knihy...'
