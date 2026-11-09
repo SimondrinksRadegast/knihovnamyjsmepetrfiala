@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import type { Book, UserRole, ViewTab, User } from './types';
+import type { Book, UserRole, ViewTab, User, SearchField } from './types';
 import { Header } from './components/Header';
 import { BookCatalog } from './components/BookCatalog';
 import { BookScanner } from './components/BookScanner';
@@ -26,6 +26,7 @@ export function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(loadStoredUser);
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchField, setSearchField] = useState<SearchField>('all');
   const [selectedBookForQR, setSelectedBookForQR] = useState<Book | null>(null);
 
   // Persist books on every change
@@ -130,6 +131,8 @@ export function App() {
         onLogout={handleLogout}
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
+        searchField={searchField}
+        setSearchField={setSearchField}
       />
 
       {/* Main Content Area */}
@@ -138,6 +141,9 @@ export function App() {
           <BookCatalog
             books={books}
             searchQuery={searchQuery}
+            searchField={searchField}
+            onSearchQueryChange={setSearchQuery}
+            onSearchFieldChange={setSearchField}
             userRole={userRole}
             onEditBook={handleEditBook}
             onAddBook={handleAddBook}

@@ -38,3 +38,5 @@ export interface User {
 }
 
 export type ViewTab = 'katalog' | 'rozpoznani' | 'sprava' | 'qr-generator';
+
+export type SearchField = 'all' | 'title' | 'author' | 'title_and_author';
