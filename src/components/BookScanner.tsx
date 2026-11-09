@@ -70,7 +70,6 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
   const [scanInput, setScanInput] = useState('');
   const [scanMode, setScanMode] = useState<'all' | 'isbn' | 'ocr-isbn' | 'code' | 'text' | 'cover' | 'manual-isbn' | 'no-isbn'>('all');
   const [matchedBooks, setMatchedBooks] = useState<Book[]>([]);
-  const [isSimulatingCamera, setIsSimulatingCamera] = useState(false);
   const [lastScannedResult, setLastScannedResult] = useState<string | null>(null);
   const [actionSuccessMessage, setActionSuccessMessage] = useState<string | null>(null);
 
@@ -328,57 +327,6 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
 
     setMatchedBooks(results);
     setMatchedConfidence(confMap);
-  };
-
-  const handleSimulateScan = (book: Book) => {
-    setIsSimulatingCamera(true);
-    setLastScannedResult(null);
-
-    setTimeout(() => {
-      setIsSimulatingCamera(false);
-      setScanInput(book.code);
-      setMatchedBooks([book]);
-      setLastScannedResult(`Naskenován QR kód: ${book.code} (${book.title})`);
-    }, 1200);
-  };
-
-  const handleSimulateCoverScan = (book: Book) => {
-    setIsSimulatingCamera(true);
-    setLastScannedResult(null);
-    setScanMode('cover');
-    setSelectedCoverImage(book.coverImage || null);
-
-    const sampleJacketText = book.jacketAuthorInfo || `${book.author} - ${book.title}. Autorské informace z přebalu knihy.`;
-    setJacketOcrText(sampleJacketText);
-
-    setTimeout(() => {
-      setIsSimulatingCamera(false);
-      setScanInput(book.title);
-      setMatchedBooks([book]);
-      setMatchedConfidence({ [book.id]: 98 });
-      setLastScannedResult(`Rozpoznán obal & autor na přebalu: ${book.title} od ${book.author} (Míra shody: 98%)`);
-    }, 1500);
-  };
-
-  /**
-   * Simulates or triggers text-based ISBN OCR recognition from printed samples
-   */
-  const handleSimulateOcrTextScan = (sampleText: string, description: string) => {
-    setIsOcrProcessing(true);
-    setScanMode('ocr-isbn');
-    setRawPastedOcrText(sampleText);
-
-    setTimeout(() => {
-      const result = extractIsbnFromText(sampleText);
-      setIsOcrProcessing(false);
-      setOcrTextResult(result);
-
-      if (result.detectedIsbn) {
-        const found = result.formattedIsbn || result.detectedIsbn;
-        handleSearch(found, 'ocr-isbn');
-        setLastScannedResult(`OCR přečteno tištěné číslo: ${found} (${description})`);
-      }
-    }, 700);
   };
 
   /**
@@ -1360,51 +1308,6 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
                 </div>
               )}
 
-              {/* Simulation buttons for OCR ISBN */}
-              <div>
-                <p className="text-[11px] font-bold text-cyan-950 uppercase mb-1.5 flex items-center gap-1">
-                  <ScanText size={12} className="text-cyan-700" /> Vyzkoušet ukázky tištěného ISBN bez čárového kódu:
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    onClick={() =>
-                      handleSimulateOcrTextScan(
-                        'Vydalo nakladatelství Československý spisovatel v Praze. Náklad 50 000 výtisků. ISBN 978-80-7390-348-1. Vázáno.',
-                        'Babička (tiráž s ISBN-13)'
-                      )
-                    }
-                    disabled={isOcrProcessing}
-                    className="px-2.5 py-1.5 bg-white hover:bg-cyan-100 text-cyan-900 border border-cyan-300 rounded-lg text-xs font-mono transition flex items-center gap-1 shadow-2xs"
-                  >
-                    <span>📖 Babička: ISBN 978-80-7390-348-1</span>
-                  </button>
-                  <button
-                    onClick={() =>
-                      handleSimulateOcrTextScan(
-                        'Karel Čapek: R.U.R. Vydalo nakladatelství Aventinum. ISBN 978-80-207-1830-2. Původní divadelní tisk.',
-                        'R.U.R. (textové ISBN bez čárového kódu)'
-                      )
-                    }
-                    disabled={isOcrProcessing}
-                    className="px-2.5 py-1.5 bg-white hover:bg-cyan-100 text-cyan-900 border border-cyan-300 rounded-lg text-xs font-mono transition flex items-center gap-1 shadow-2xs"
-                  >
-                    <span>📖 R.U.R.: ISBN 978-80-207-1830-2</span>
-                  </button>
-                  <button
-                    onClick={() =>
-                      handleSimulateOcrTextScan(
-                        'František Tichý: Sto kreseb. ISBN 978-80-257-2624-2. Vydáno v Praze roku 2018.',
-                        'Sto kreseb (ISBN z tiráže)'
-                      )
-                    }
-                    disabled={isOcrProcessing}
-                    className="px-2.5 py-1.5 bg-white hover:bg-cyan-100 text-cyan-900 border border-cyan-300 rounded-lg text-xs font-mono transition flex items-center gap-1 shadow-2xs"
-                  >
-                    <span>📖 Sto kreseb: ISBN 978-80-257-2624-2</span>
-                  </button>
-                </div>
-              </div>
-
               {/* Quick switch if text/photo is stained/illegible */}
               <div className="bg-amber-50/80 border border-amber-200/90 rounded-xl p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5">
                 <div className="flex items-center gap-2 text-xs text-amber-900">
@@ -1485,57 +1388,6 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
             </div>
           )}
 
-          {/* Quick simulation buttons for existing books */}
-          <div className="space-y-3">
-            <div>
-              <p className="text-xs font-bold text-slate-600 uppercase mb-2 flex items-center gap-1">
-                <QrCode size={13} className="text-blue-600" /> Simulace okamžitého naskenování QR / EAN ISBN:
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {books.slice(0, 3).map((book) => (
-                  <button
-                    key={book.id}
-                    onClick={() => handleSimulateScan(book)}
-                    disabled={isSimulatingCamera}
-                    className="px-3 py-1.5 bg-slate-100 hover:bg-blue-50 hover:text-blue-700 text-slate-700 border border-slate-200 rounded-lg text-xs font-mono transition flex items-center gap-1.5"
-                  >
-                    <QrCode size={13} />
-                    <span>{book.code}</span>
-                  </button>
-                ))}
-                <button
-                  onClick={() => {
-                    setScanMode('isbn');
-                    handleDecodedCode('9788025726242');
-                  }}
-                  disabled={isSimulatingCamera}
-                  className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-300 rounded-lg text-xs font-mono transition flex items-center gap-1.5 font-bold"
-                >
-                  <Search size={13} />
-                  <span>Test EAN: 9788025726242 (Knihovny.cz)</span>
-                </button>
-              </div>
-            </div>
-
-            <div>
-              <p className="text-xs font-bold text-indigo-900 uppercase mb-2 flex items-center gap-1">
-                <ImageIcon size={13} className="text-indigo-600" /> Simulace rozpoznání podle obalu & přebalu (autor/medailonek):
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {books.filter((b) => b.jacketAuthorInfo).slice(0, 4).map((book) => (
-                  <button
-                    key={book.id}
-                    onClick={() => handleSimulateCoverScan(book)}
-                    disabled={isSimulatingCamera}
-                    className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-900 border border-indigo-200 rounded-lg text-xs transition flex items-center gap-1.5 font-medium"
-                  >
-                    <BookOpen size={13} className="text-indigo-600" />
-                    <span>Obal: {book.title} ({book.author})</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
         </div>
 
         {/* Right Column: Camera / Scanner Box */}
@@ -1607,12 +1459,6 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
               <RefreshCw size={40} className="text-blue-400 animate-spin mx-auto" />
               <p className="text-sm font-bold text-blue-200">Spouštění optiky kamery...</p>
               <p className="text-xs text-slate-400">Povolte v prohlížeči přístup ke kameře</p>
-            </div>
-          ) : isSimulatingCamera ? (
-            <div className="space-y-3 z-10 py-6">
-              <RefreshCw size={40} className="text-blue-400 animate-spin mx-auto" />
-              <p className="text-sm font-bold text-blue-200">Probíhá analýza a optické rozpoznání...</p>
-              <p className="text-xs text-slate-400">Načítání údajů z databáze knihovny</p>
             </div>
           ) : !isCameraActive ? (
             <div className="space-y-3 z-10 py-2">
@@ -1711,7 +1557,7 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onUpdateBookSta
             )}
           </div>
 
-          {lastScannedResult && !isSimulatingCamera && (
+          {lastScannedResult && (
             <div className="mt-3 text-xs bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 p-2.5 rounded-lg z-10 font-mono flex flex-col items-center gap-1.5 w-full max-w-sm">
               <div className="flex items-center gap-1.5 font-bold">
                 <CheckCircle size={14} className="text-emerald-400 shrink-0" />
